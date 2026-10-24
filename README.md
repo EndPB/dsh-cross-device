@@ -104,3 +104,23 @@ hub/                  standalone hub CLI/server
 test/                 vitest suites
 docs/                 protocol/deploy notes
 ```
+## 实测：桌面 + 安卓平板（2026-10-24）
+
+真实双节点已跑通，不是模拟：
+
+- 桌面端（`两仪卨`，win32）起 hub：`node hub/cli.js --host 0.0.0.0 --port 8788 --allow-any`
+- 平板端（OPPO OPD2506，Android 16，DSHA 0.2.21，proot/Ubuntu，node v24.19）在「插件市场 → 从链接安装」直接装本仓库，装完自动启用
+- 平板 `settings.json` 写入 `hub.url = ws://127.0.0.1:8788`（测试期用 `adb reverse tcp:8788 tcp:8788` 打洞；同一 Wi-Fi 下可直接用 `ws://<桌面局域网IP>:8788`）
+- 两端各自 Ed25519 身份，hub 上看到两个节点：
+
+```
+PEERS node:win32, dsha-tablet:linux
+TABLET n_RVPBqSrD658ouj4Z caps= system.info,gpu.info,...,android.device,android.screenshot,...
+RESULT {"text":"model=OPPO OPD2506\nandroid=16 (SDK 36)\nbattery=76% charging=true\nnetwork=wifi\nscreen=on\nstorage_free=33.56 GB total=99.56 GB"}
+```
+
+即：桌面侧发起 `tool.call` → hub 路由 → 平板上的插件执行 `android.device` → 走 DSHA 本机 3090 桥拿到真实设备数据并回传。整条链路（身份、鉴权、目录同步、RPC、桥调用）都在真实设备上验证过。
+
+平板端面板截图见 `docs/tablet-panel.png`。
+
+已知待办：平板侧 `index.js` 目前也会注册桌面能力（system/gpu/fs），在 Linux 上属噪声，应按平台过滤；桌面侧动态注册的 `node__<slug>__<tool>` 工具要在 DSH 重启或新会话后才稳定出现在模型工具表里。
