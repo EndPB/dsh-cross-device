@@ -123,17 +123,6 @@ export async function apply(ctx, config = {}) {
 
   sessionFabric = new SessionFabric({ ctx, hub: undefined, node, registry, provenance, settings, log, onUpdate })
   await sessionFabric.init()
-  try {
-    const fs = await import('node:fs')
-    let sessionsValue
-    try { sessionsValue = ctx.get?.('sessions') } catch (e) { sessionsValue = `THREW: ${e?.message}` }
-    fs.writeFileSync('C:/Users/86132/.dsh/cross-device/debug.json', JSON.stringify({
-      getType: typeof ctx.get,
-      sessionsType: sessionsValue === undefined ? 'undefined' : typeof sessionsValue,
-      sessionsThrew: typeof sessionsValue === 'string' ? sessionsValue : undefined,
-    }, null, 2))
-  } catch (e) { log(`debug write failed ${String(e)}`) }
-
   const onRpc = async (method, params, frame) => {
     if (method.startsWith('tool.') || method.startsWith('node.')) return toolFabric.handleRpc(method, params, frame)
     if (method.startsWith('session.') || method.startsWith('takeover.')) return sessionFabric.handleRpc(method, params, frame)
