@@ -1,0 +1,50 @@
+{
+  "name": "@local/dsh-cross-device",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Distributed DSH node fabric: cross-device sessions, remote tools, and device provenance",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src/**/*.js",
+    "hub/**/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  },
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "test": "vitest run --pool=forks",
+    "test:watch": "vitest",
+    "hub": "node hub/cli.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2",
+    "vitest": "^3.2.4"
+  }
+}

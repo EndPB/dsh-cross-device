@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-cross-device
+      name: '@local/dsh-cross-device'
+      config: {}

@@ -1,0 +1,12 @@
+{
+  "nav": "Nodes",
+  "title": "Node Network",
+  "lead": "One session can run tools on many devices. Manage nodes, shared sessions, and provenance here.",
+  "settings": "Settings",
+  "nodes": "Nodes",
+  "sessions": "Shared sessions",
+  "share": "Share to node network",
+  "takeover": "Take over here",
+  "send": "Send",
+  "provenance": "Provenance"
+}
