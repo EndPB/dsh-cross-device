@@ -23,11 +23,12 @@ export function defaultSettings(env = process.env) {
       repo: '',
       branch: 'main',
       token: '',
+      login: '',
     },
     hub: {
       url: '',
       mode: 'lan',
-      runLocal: false,
+      runLocal: true,
       port: 8788,
     },
     tools: {

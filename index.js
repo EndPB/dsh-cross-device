@@ -115,6 +115,8 @@ export async function apply(ctx, config = {}) {
     coordinating: sessionFabric?.listCoordinating() ?? [],
     viewing: sessionFabric?.listViewing() ?? [],
     capabilities: toolFabric.summary(),
+    github: { repo: settings.github.repo, login: settings.github.login ?? '', hasToken: Boolean(settings.github.token) },
+    isDesktop: !isMobile,
     githubConfigured: Boolean(settings.github.repo),
   })
 
@@ -171,7 +173,7 @@ export async function apply(ctx, config = {}) {
     if (localHub !== undefined) return localHub
     const port = Number(settings.hub.port ?? 8788)
     localHub = await createHubServer({
-      host: '127.0.0.1',
+      host: '0.0.0.0',
       port,
       allowAny: settings.hub.allowAny === true || (settings.hub.runLocal === true && !settings.github.repo),
       hubName: `${node.name} hub`,
@@ -236,7 +238,26 @@ export async function apply(ctx, config = {}) {
         onUpdate()
         return sanitizeSettings(settings)
       }
-      case 'nodes':
+      case 'github.login': {
+        const { execFile } = await import('node:child_process')
+        const text = await new Promise((resolve, reject) => {
+          const child = execFile('git', ['-c', 'credential.helper=manager', 'credential', 'fill'], { timeout: 20_000 }, (error, stdout) => {
+            if (error) reject(error)
+            else resolve(String(stdout))
+          })
+          child.stdin?.end('protocol=https\nhost=github.com\n\n')
+        })
+        const token = /^password=(.+)$/mu.exec(text)?.[1]?.trim()
+        const login = /^username=(.+)$/mu.exec(text)?.[1]?.trim() ?? ''
+        if (!token) throw Object.assign(new Error('no GitHub credential on this machine; sign in with git once'), { code: 'NO_CREDENTIAL' })
+        const repo = settings.github.repo || (login ? `${login}/dsh-cross-device-config` : '')
+        settings = await store.save({ ...settings, github: { ...settings.github, token, login, repo } })
+        if (registry !== undefined) registry.settings = settings
+        await publishNode()
+        await refresh()
+        onUpdate()
+        return { login, repo, message: `已登录 ${login || 'GitHub'}，配置仓库 ${repo}` }
+      }      case 'nodes':
         return {
           self: buildState().node,
           peers: buildState().peers,

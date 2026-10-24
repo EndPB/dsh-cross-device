@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
         noNodes: '还没有其他节点。先在另一台设备上安装并连接同一 GitHub 配置仓库。',
         localSessions: '本机会话', shareSelected: '共享', space: '共享区', refresh: '刷新',
         connected: '已连接', disconnected: '未连接', save: '保存', saved: '已保存',
-        githubRepo: 'GitHub 配置仓库', githubToken: 'GitHub Token（只存本机）',
+        githubRepo: '配置仓库', githubToken: 'GitHub Token（只存本机）', githubSection: 'GitHub 配置服务器', githubLogin: '登录 GitHub', githubSignedIn: '已登录', githubNotSignedIn: '未登录，点按钮自动读取本机 git 凭据', githubRepoAuto: '登录后自动使用 dsh-cross-device-config', hubSection: '连接方式', hubLan: '局域网（默认，自动发现）', hubCustom: '自定义地址（cpolar / 公网）',
         hubUrl: 'Hub 地址（wss://…）', runLocalHub: '在本机启动 Hub', nodeName: '本机节点名',
         allowAny: '允许任意节点（仅本地测试）', capabilities: '能力', provenance: '来源记录',
         answeredOn: '回答于', toolsOn: '工具', from: '来自', you: '你', load: '加载中…',
@@ -40,7 +40,7 @@ window.__ModuleLoader__.load({
         noNodes: 'No other nodes yet. Install the plugin on another device and connect the same GitHub config repo.',
         localSessions: 'Local sessions', shareSelected: 'Share', space: 'Space', refresh: 'Refresh',
         connected: 'Connected', disconnected: 'Disconnected', save: 'Save', saved: 'Saved',
-        githubRepo: 'GitHub config repo', githubToken: 'GitHub token (stored locally)',
+        githubRepo: 'Config repo', githubToken: 'GitHub token (stored locally)', githubSection: 'GitHub config server', githubLogin: 'Sign in to GitHub', githubSignedIn: 'Signed in', githubNotSignedIn: 'Not signed in - the button reuses this machine git credential', githubRepoAuto: 'uses dsh-cross-device-config automatically', hubSection: 'Connection', hubLan: 'LAN (default, auto)', hubCustom: 'Custom URL (cpolar/public)',
         hubUrl: 'Hub URL (wss://…)', runLocalHub: 'Run hub on this node', nodeName: 'This node name',
         allowAny: 'Allow any node (local testing only)', capabilities: 'Capabilities', provenance: 'Provenance',
         answeredOn: 'Answered on', toolsOn: 'Tools', from: 'from', you: 'you', load: 'Loading…',
@@ -329,38 +329,62 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       React.useEffect(() => { void store.refresh() }, [store])
       React.useEffect(() => {
-        if (status !== undefined && form === undefined) {
-          setForm({
-            repo: '', token: '', hubUrl: status.hub?.url ?? '', runLocal: status.hub?.local === true,
-            allowAny: false, nodeName: status.node?.name ?? '',
-          })
-        }
+        if (status === undefined || form !== undefined) return
+        const gh = status.github ?? {}
+        setForm({
+          repo: gh.repo ?? '',
+          login: gh.login ?? '',
+          hasToken: gh.hasToken === true,
+          mode: status.hub?.mode === 'custom' ? 'custom' : 'lan',
+          hubUrl: status.hub?.url ?? '',
+          runLocal: status.hub?.local ?? status.isDesktop !== false,
+          allowAny: status.hub?.allowAny === true,
+          nodeName: status.node?.name ?? '',
+        })
       }, [status, form])
       if (form === undefined) return h('div', { className: 'nf-root' }, t('load'))
       const set = (key) => (event) => setForm({ ...form, [key]: event.target.type === 'checkbox' ? event.target.checked : event.target.value })
+      const login = async () => {
+        setBusy(true); setNotice(undefined)
+        try {
+          const value = await rpc('github.login', {})
+          setForm({ ...form, repo: value?.repo ?? form.repo, login: value?.login ?? '', hasToken: true })
+          setNotice(value?.message ?? t('githubSignedIn'))
+          await store.refresh()
+        } catch (error) { setNotice(error.message) } finally { setBusy(false) }
+      }
       const save = async () => {
         setBusy(true)
         try {
           await rpc('configure', {
-            github: { repo: form.repo || undefined, token: form.token || undefined },
-            hub: { url: form.hubUrl || '', runLocal: form.runLocal, allowAny: form.allowAny },
+            github: form.hasToken ? { repo: form.repo || undefined } : undefined,
+            hub: { mode: form.mode, url: form.mode === 'custom' ? form.hubUrl : '', runLocal: form.runLocal, allowAny: form.allowAny },
             node: { name: form.nodeName || undefined },
           })
           setNotice(t('saved')); await store.refresh()
         } catch (error) { setNotice(error.message) } finally { setBusy(false) }
       }
+      const lanUrl = status?.hub?.url
       return h('div', { className: 'nf-root' },
         h('h2', { className: 'nf-title' }, t('settings')),
         notice ? h('div', { className: 'nf-muted' }, notice) : null,
         h('div', { className: 'nf-card' },
-          h('div', { className: 'nf-muted' }, t('githubRepo')),
-          h('input', { className: 'nf-input', value: form.repo, onChange: set('repo'), placeholder: 'owner/private-repo' }),
-          h('div', { className: 'nf-muted' }, t('githubToken')),
-          h('input', { className: 'nf-input', type: 'password', value: form.token, onChange: set('token'), placeholder: 'github_pat_…' }),
+          h('h2', { className: 'nf-section-title' }, t('githubSection')),
+          h('div', { className: 'nf-row' },
+            h('div', { className: 'nf-muted' }, form.hasToken ? `${t('githubSignedIn')}: ${form.login || 'ok'}` : t('githubNotSignedIn')),
+            h('button', { className: 'nf-btn', onClick: () => void login(), disabled: busy }, t('githubLogin')),
+          ),
+          h('div', { className: 'nf-muted' }, `${t('githubRepo')}: ${form.repo || t('githubRepoAuto')}`),
         ),
         h('div', { className: 'nf-card' },
-          h('div', { className: 'nf-muted' }, t('hubUrl')),
-          h('input', { className: 'nf-input', value: form.hubUrl, onChange: set('hubUrl'), placeholder: 'wss://…' }),
+          h('h2', { className: 'nf-section-title' }, t('hubSection')),
+          h('label', { className: 'nf-row' },
+            h('input', { type: 'radio', name: 'hubmode', checked: form.mode === 'lan', onChange: () => setForm({ ...form, mode: 'lan' }) }),
+            `${t('hubLan')}${lanUrl ? ` · ${lanUrl}` : ''}`),
+          h('label', { className: 'nf-row' },
+            h('input', { type: 'radio', name: 'hubmode', checked: form.mode === 'custom', onChange: () => setForm({ ...form, mode: 'custom' }) }),
+            t('hubCustom')),
+          form.mode === 'custom' ? h('input', { className: 'nf-input', value: form.hubUrl, onChange: set('hubUrl'), placeholder: 'wss://' }) : null,
           h('label', { className: 'nf-row' }, h('input', { type: 'checkbox', checked: form.runLocal, onChange: set('runLocal') }), t('runLocalHub')),
           h('label', { className: 'nf-row' }, h('input', { type: 'checkbox', checked: form.allowAny, onChange: set('allowAny') }), t('allowAny')),
           h('div', { className: 'nf-muted' }, t('nodeName')),
