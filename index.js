@@ -70,8 +70,10 @@ export async function apply(ctx, config = {}) {
 
   let hub
   const toolFabric = new ToolFabric({ ctx, hub: undefined, node, settings, log })
-  toolFabric.addLocalAll(await desktopCapabilities(settings))
-  toolFabric.addLocalAll(await androidCapabilities())
+  const androidCaps = await androidCapabilities()
+  const isMobile = androidCaps.some((capability) => capability.enabled !== false)
+  if (!isMobile) toolFabric.addLocalAll(await desktopCapabilities(settings))
+  toolFabric.addLocalAll(androidCaps)
   toolFabric.hub = undefined
 
   const provenance = new Provenance({

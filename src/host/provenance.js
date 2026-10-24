@@ -199,21 +199,21 @@ export class Provenance {
     const session = agent?.session
     const header = [
       '## Distributed DSH nodes',
-      `You are the coordinator running on ${this.node.name} (${this.node.platform}).`,
-      'User messages sent from another node start with a `[[device:<nodeId>|<name>|<platform>|<time>]]` marker; unmarked user messages were sent on this node.',
-      'Tools named `node__<slug>__<tool>` execute on that node. One answer may use tools from several devices.',
-      'Use `provenance_recent` when the user asks which device sent a message or which device produced an earlier answer.',
+      `Coordinator: ${this.node.name} (${this.node.platform}).`,
+      'Remote user messages start with `[[device:<id>|<name>|<platform>|<time>]]`; unmarked ones came from this node.',
+      'Remote tools are `node__<slug>__<tool>`, or `node__<slug>` taking {tool,args} when that peer exposes many capabilities.',
+      '`provenance_recent` answers "which device" questions.',
     ]
     if (session === undefined) return header.join('\n')
     const records = this.recent(session)
     if (records.length === 0) return header.join('\n')
+    const clock = (at) => new Date(at).toISOString().slice(11, 19)
     const lines = records.map((record) => {
-      const who = `${record.nodeName} (${record.platform})`
-      if (record.kind === 'user') return `- user from ${who}${record.local ? '' : ' [remote]'} at ${new Date(record.at).toISOString()}`
-      if (record.kind === 'assistant') return `- assistant on ${who} at ${new Date(record.at).toISOString()}${record.toolNodes?.length ? ` (tools: ${record.toolNodes.join(', ')})` : ''}`
-      return `- tool ${record.tool} on ${who} at ${new Date(record.at).toISOString()}`
+      if (record.kind === 'user') return `${clock(record.at)} user ${record.nodeName}${record.local ? '' : ' (remote)'}`
+      if (record.kind === 'assistant') return `${clock(record.at)} answer ${record.nodeName}`
+      return `${clock(record.at)} tool ${record.tool} ${record.nodeName}`
     })
-    return `${header.join('\n')}\n\nRecent device provenance:\n${lines.join('\n')}`
+    return `${header.join('\n')}\nRecent: ${lines.join('; ')}`
   }
 
   registerSystemPrompt(ctx) {

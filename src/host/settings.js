@@ -30,6 +30,12 @@ export function defaultSettings(env = process.env) {
       runLocal: false,
       port: 8788,
     },
+    tools: {
+      mode: 'auto',
+      individualLimit: 6,
+      maxOutputChars: 4000,
+      descriptionBudget: 1500,
+    },
     capabilities: {
       android: true,
       system: true,
@@ -40,7 +46,7 @@ export function defaultSettings(env = process.env) {
     provenance: {
       enabled: true,
       marker: true,
-      recentLimit: 4,
+      recentLimit: 3,
     },
     ui: {
       autoFocus: true,
