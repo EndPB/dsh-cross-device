@@ -70,7 +70,7 @@ export class LanLink {
     for (const entry of interfaces) {
       const sender = this.sendVia(entry.ip)
       if (sender === undefined) continue
-      sender.send(buffer, LAN_PORT, entry.broadcast, () => {})
+      this.send(sender, buffer, entry.broadcast)
     }
   }
 
@@ -103,12 +103,23 @@ export class LanLink {
     if (this.senders.size > 6) return undefined
     try {
       const socket = dgram.createSocket({ type: 'udp4' })
-      socket.bind({ address: ip, port: 0 })
-      socket.setBroadcast(true)
+      const entry = { socket, ready: false, queue: [] }
       socket.on('error', () => {})
-      this.senders.set(ip, socket)
-      return socket
+      socket.on('listening', () => {
+        try { socket.setBroadcast(true) } catch {}
+        entry.ready = true
+        for (const [buffer, port, target] of entry.queue) socket.send(buffer, port, target, () => {})
+        entry.queue = []
+      })
+      socket.bind({ address: ip, port: 0 })
+      this.senders.set(ip, entry)
+      return entry
     } catch { return undefined }
+  }
+
+  send(entry, buffer, target) {
+    if (entry.ready) entry.socket.send(buffer, LAN_PORT, target, () => {})
+    else entry.queue.push([buffer, LAN_PORT, target])
   }
 
   setHubUrl(url, urls) {
@@ -136,7 +147,7 @@ export class LanLink {
 
   dispose() {
     clearInterval(this.timer)
-    for (const sender of this.senders.values()) { try { sender.close() } catch {} }
+    for (const entry of this.senders.values()) { try { entry.socket.close() } catch {} }
     this.senders.clear()
     try { this.socket?.close() } catch {}
     this.socket = undefined
