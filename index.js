@@ -131,7 +131,31 @@ export async function apply(ctx, config = {}) {
 
   sessionFabric = new SessionFabric({ ctx, hub: undefined, node, registry, provenance, settings, log, onUpdate })
   await sessionFabric.init()
+  const listLocalSessions = async () => {
+    const controller = ctx.get?.('sessionController')
+    if (controller?.list === undefined) return []
+    const value = await controller.list({}, new AbortController().signal)
+    return (value?.items ?? []).map((item) => ({
+      id: String(item.sessionId ?? item.id ?? ''),
+      title: item.title ?? undefined,
+      cwd: item.cwd,
+      running: item.running === true,
+      updatedAt: item.updatedAt ?? item.mtime,
+      node: node.name,
+      nodeId: node.id,
+      local: true,
+    })).filter((row) => row.id !== '')
+  }
+  const createLocalSession = async (cwd) => {
+    const controller = ctx.get?.('sessionController')
+    if (controller?.create === undefined) throw new Error('this DSH build exposes no sessionController.create')
+    const created = await controller.create({ cwd }, new AbortController().signal)
+    const id = created?.sessionId ?? created?.id ?? created?.session?.id
+    return { id }
+  }
   const onRpc = async (method, params, frame) => {
+    if (method === 'session.list') return { items: await listLocalSessions() }
+    if (method === 'sessions.create') return await createLocalSession(params?.cwd)
     if (method.startsWith('tool.') || method.startsWith('node.')) return toolFabric.handleRpc(method, params, frame)
     if (method.startsWith('session.') || method.startsWith('takeover.')) return sessionFabric.handleRpc(method, params, frame)
     throw Object.assign(new Error(`unknown rpc method ${method}`), { code: 'UNKNOWN_METHOD' })
@@ -259,12 +283,25 @@ export async function apply(ctx, config = {}) {
         }
         return result
       }      case 'sessions.create': {
-        const controller = ctx.get?.('sessionController')
-        if (controller?.create === undefined) throw new Error('this DSH build exposes no sessionController.create')
-        const created = await controller.create({ cwd: input.cwd }, new AbortController().signal)
-        const id = created?.sessionId ?? created?.id ?? created?.session?.id
+        const peer = input.nodeId !== undefined && input.nodeId !== ''
+          ? [...(hub?.peers?.values?.() ?? [])].find((row) => row.id === input.nodeId || row.slug === input.nodeId)
+          : undefined
+        const created = peer === undefined
+          ? await createLocalSession(input.cwd)
+          : await hub.call(peer.id, 'sessions.create', { cwd: input.cwd }, { timeoutMs: 30_000 })
         onUpdate()
-        return { id }
+        return { ...created, nodeId: peer?.id ?? node.id, node: peer?.name ?? node.name }
+      }
+      case 'sessions.all': {
+        const items = await listLocalSessions()
+        for (const peer of hub?.peers?.values?.() ?? []) {
+          try {
+            const remote = await hub.call(peer.id, 'session.list', {}, { timeoutMs: 4000 })
+            for (const row of remote?.items ?? []) items.push({ ...row, node: peer.name, nodeId: peer.id, local: false })
+          } catch {}
+        }
+        items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+        return { items }
       }      case 'nodes':
         return {
           self: buildState().node,

@@ -239,12 +239,35 @@ window.__ModuleLoader__.load({
       }).filter(Boolean))
     }
 
+    function AllSessionsPlaceholder() { return null }
+
+    function AllSessions({ rpc, t, onOpen }) {
+      const [items, setItems] = React.useState([])
+      React.useEffect(() => {
+        let cancelled = false
+        const load = () => rpc('sessions.all', {}).then((value) => { if (!cancelled) setItems(value?.items ?? []) }).catch(() => {})
+        void load()
+        const timer = setInterval(load, 15000)
+        return () => { cancelled = true; clearInterval(timer) }
+      }, [rpc])
+      if (items.length === 0) return h('div', { className: 'nf-empty' }, t('noSessions'))
+      return h('div', { className: 'nf-list' }, items.slice(0, 40).map((row) => h('div', {
+        key: `${row.nodeId}:${row.id}`, className: 'nf-item', role: 'button', tabIndex: 0, onClick: () => onOpen(row),
+      },
+        h('div', { className: 'nf-item-head' },
+          h('div', { className: 'nf-item-title' }, row.title || row.id),
+          h('span', { className: 'nf-badge self' }, row.node ?? ''),
+        ),
+        h('div', { className: 'nf-item-sub' }, `${row.cwd ?? ''} · ${row.running ? 'running' : 'idle'}`),
+      )))
+    }
     function NodeFabricPanel({ rpc, ctx, t }) {
       const store = React.useMemo(() => createStore(rpc), [rpc])
       const state = useStore(store)
       const [selected, setSelected] = React.useState(undefined)
       const [text, setText] = React.useState('')
       const [busy, setBusy] = React.useState(undefined)
+      const [newTarget, setNewTarget] = React.useState('')
       const [provenanceRecords, setProvenanceRecords] = React.useState([])
       React.useEffect(() => { void store.refresh(); void store.loadLocalSessions(); store.connect() }, [store])
       React.useEffect(() => {
@@ -310,19 +333,23 @@ window.__ModuleLoader__.load({
         h('div', { className: 'nf-card' },
           h('div', { className: 'nf-row' },
             h('h2', { className: 'nf-section-title' }, t('localSessions')),
+            h('select', { className: 'nf-input', value: newTarget, onChange: (event) => setNewTarget(event.target.value), style: { maxWidth: '220px' } },
+              h('option', { value: '' }, `${t('newSession')} · ${status?.node?.name ?? ''}`),
+              (status?.peers ?? []).map((peer) => h('option', { key: peer.id, value: peer.id }, `${t('newSession')} · ${peer.name}`)),
+            ),
             h('button', { className: 'nf-btn primary', disabled: busy === 'new', onClick: async () => {
               setBusy('new')
               try {
-                const created = await rpc('sessions.create', {})
+                const created = await rpc('sessions.create', { nodeId: newTarget || undefined })
                 await store.refresh(); await store.loadLocalSessions()
-                if (created?.id) ctx.uiWorkspace.openSession(created.id)
+                if (created?.id && (created.nodeId === undefined || created.nodeId === status?.node?.id)) ctx.uiWorkspace.openSession(created.id)
               } catch (error) { store.set({ error: error.message }) } finally { setBusy(undefined) }
             } }, t('newSession')),
           ),
-          h('div', { className: 'nf-list' }, localItems.slice(0, 20).map((item) => h('div', { className: 'nf-item', key: String(item.sessionId), role: 'button', tabIndex: 0, onClick: () => ctx.uiWorkspace.openSession(String(item.sessionId)) },
-            h('div', { className: 'nf-item-head' }, h('div', { className: 'nf-item-title' }, String(item.sessionId)), h('span', { className: 'nf-badge self' }, status?.node?.name ?? '')),
-            h('div', { className: 'nf-item-sub' }, `${item.cwd ?? ''} · ${item.running ? 'running' : 'idle'}`),
-          ))),
+          h(AllSessions, { rpc, t, onOpen: (row) => {
+            if (row.local) { ctx.uiWorkspace.openSession(row.id); return }
+            void rpc('subscribe', { sessionId: row.id }).then(() => { setSelected(row.id); void store.loadHistory(row.id) }).catch((error) => store.set({ error: error.message }))
+          } }),
         ),      )
     }
 
