@@ -227,7 +227,7 @@ export async function apply(ctx, config = {}) {
       logger: { info: log, warn: log },
     })
     const urls = lanUrls(localHub.port)
-    lanLink.setHubUrl(publicUrl, urls); lanLink.hub = true
+    lanLink.setHubUrl(urls[0] ?? `ws://127.0.0.1:${localHub.port}`, urls); lanLink.hub = true
     const publicUrl = settings.hub.url || urls[0] || `ws://127.0.0.1:${localHub.port}`
     await registry.publishHub({ url: publicUrl, mode: settings.hub.url ? 'cpolar' : 'lan', hubNodeId: node.id, lanUrls: [`ws://127.0.0.1:${localHub.port}`, ...urls] }).catch((error) => log(`hub publish failed: ${String(error)}`))
     return localHub
