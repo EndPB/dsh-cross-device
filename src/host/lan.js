@@ -17,6 +17,8 @@ export class LanLink {
     this.log = log
     this.url = ''
     this.peers = new Map()
+    this.senders = new Map()
+    this.urls = []
     this.socket = undefined
     this.timer = undefined
   }
@@ -58,30 +60,60 @@ export class LanLink {
 
   announce() {
     if (this.socket === undefined) return
-    const packet = JSON.stringify({ t: 'cd', id: this.nodeId, name: this.name, platform: this.platform, url: this.url })
+    const packet = JSON.stringify({ t: 'cd', id: this.nodeId, name: this.name, platform: this.platform, url: this.url, urls: this.urls ?? [] })
     const buffer = Buffer.from(packet)
-    for (const target of ['255.255.255.255', ...this.broadcastAddresses()]) {
-      this.socket.send(buffer, LAN_PORT, target, () => {})
+    const interfaces = this.physical()
+    if (interfaces.length === 0) {
+      this.socket.send(buffer, LAN_PORT, '255.255.255.255', () => {})
+      return
+    }
+    for (const entry of interfaces) {
+      const sender = this.sendVia(entry.ip)
+      if (sender === undefined) continue
+      sender.send(buffer, LAN_PORT, entry.broadcast, () => {})
     }
   }
 
-  broadcastAddresses() {
-    try {
-      const { networkInterfaces } = process.getBuiltinModule?.('node:os') ?? require('node:os')
-      const out = []
-      for (const list of Object.values(networkInterfaces() ?? {})) {
-        for (const entry of list ?? []) {
-          if (entry.family !== 'IPv4' || entry.internal) continue
-          const parts = entry.address.split('.')
-          if (parts.length === 4) out.push(`${parts[0]}.${parts[1]}.${parts[2]}.255`)
-        }
+  /** Physical LAN interfaces only: VPN/TUN/VirtualBox/WSL adapters are skipped,
+   *  otherwise the beacon leaves through the tunnel and every peer learns an
+   *  address that is routable only inside that tunnel. */
+  physical() {
+    const os = process.getBuiltinModule?.('node:os')
+    if (os === undefined) return []
+    const skip = /(^|\b)(tun\d*|tap\d*|utun\d*|wg\d*|ipsec|ppp\d*|tailscale|zerotier|vgate|vpn|docker|veth|br-|virbr|vmnet|vbox|wsl|hyper-v|loopback)/iu
+    const out = []
+    for (const [name, list] of Object.entries(os.networkInterfaces() ?? {})) {
+      if (skip.test(name)) continue
+      for (const entry of list ?? []) {
+        if (entry.family !== 'IPv4' || entry.internal) continue
+        const mask = String(entry.netmask ?? '255.255.255.0').split('.').map(Number)
+        if (mask[0] === 255 && mask[1] === 255 && mask[2] === 255 && mask[3] === 255) continue
+        const ip = entry.address
+        const octets = ip.split('.').map(Number)
+        const broadcast = octets.map((value, index) => (value | (~mask[index] & 255)) & 255).join('.')
+        out.push({ name, ip, broadcast, cidr: `${ip}/${mask.reduce((sum, part) => sum + part.toString(2).split('1').length - 1, 0)}` })
       }
-      return [...new Set(out)]
-    } catch { return [] }
+    }
+    return out
   }
 
-  setHubUrl(url) {
+  sendVia(ip) {
+    const existing = this.senders.get(ip)
+    if (existing !== undefined) return existing
+    if (this.senders.size > 6) return undefined
+    try {
+      const socket = dgram.createSocket({ type: 'udp4' })
+      socket.bind({ address: ip, port: 0 })
+      socket.setBroadcast(true)
+      socket.on('error', () => {})
+      this.senders.set(ip, socket)
+      return socket
+    } catch { return undefined }
+  }
+
+  setHubUrl(url, urls) {
     this.url = url ?? ''
+    this.urls = Array.isArray(urls) ? urls : []
     this.announce()
   }
 
@@ -104,6 +136,8 @@ export class LanLink {
 
   dispose() {
     clearInterval(this.timer)
+    for (const sender of this.senders.values()) { try { sender.close() } catch {} }
+    this.senders.clear()
     try { this.socket?.close() } catch {}
     this.socket = undefined
   }

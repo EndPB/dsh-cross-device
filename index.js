@@ -30,10 +30,16 @@ function log(message) {
 }
 
 function lanUrls(port) {
+  // Only physical interfaces: a VPN/TUN adapter (vgate0, tun0, utun, tailscale)
+  // produces an address that is routable inside that tunnel and nowhere else.
+  const skip = /(^|\b)(tun\d*|tap\d*|utun\d*|wg\d*|ipsec|ppp\d*|tailscale|zerotier|vgate|vpn|docker|veth|br-|virbr|vmnet|vbox|wsl|hyper-v)/iu
   const out = []
-  for (const addresses of Object.values(networkInterfaces())) {
+  for (const [name, addresses] of Object.entries(networkInterfaces())) {
+    if (skip.test(name)) continue
     for (const address of addresses ?? []) {
       if (address.family !== 'IPv4' || address.internal) continue
+      const mask = String(address.netmask ?? '255.255.255.0').split('.').map(Number)
+      if (mask.every((part) => part === 255)) continue
       out.push(`ws://${address.address}:${port}`)
     }
   }
@@ -208,7 +214,7 @@ export async function apply(ctx, config = {}) {
       logger: { info: log, warn: log },
     })
     const urls = lanUrls(localHub.port)
-    lanLink.setHubUrl(urls[0] ?? `ws://127.0.0.1:${localHub.port}`)
+    lanLink.setHubUrl(urls[0], urls); void (urls[0] ?? `ws://127.0.0.1:${localHub.port}`)
     const publicUrl = settings.hub.url || urls[0] || `ws://127.0.0.1:${localHub.port}`
     await registry.publishHub({ url: publicUrl, mode: settings.hub.url ? 'cpolar' : 'lan', hubNodeId: node.id, lanUrls: [`ws://127.0.0.1:${localHub.port}`, ...urls] }).catch((error) => log(`hub publish failed: ${String(error)}`))
     return localHub
