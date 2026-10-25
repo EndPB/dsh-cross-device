@@ -382,8 +382,45 @@ export async function apply(ctx, config = {}) {
   })
 
   await publishNode()
-  const url = await resolveHubUrl()
-  await startHubClient(url)
+  // Every node can host, but the mesh elects ONE relay: the smallest node id
+  // that is currently advertising a hub. When that node leaves, the next one
+  // takes over, so no single desktop is required for the network to exist.
+  const localHubUrl = () => `ws://127.0.0.1:${localHub?.port ?? settings.hub.port ?? 8788}`
+  const hubBlockedUntil = new Map()
+  const pickHub = () => {
+    const now = Date.now()
+    const candidates = [{ id: node.id, url: localHubUrl() }]
+    for (const peer of lanLink.livePeers()) {
+      if (peer.url === '') continue
+      if ((hubBlockedUntil.get(peer.id) ?? 0) > now) continue
+      candidates.push({ id: peer.id, url: peer.url })
+    }
+    candidates.sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    return candidates[0]
+  }
+
+  await startLocalHub()
+  await startHubClient(pickHub().url)
+  let lastChoiceId = pickHub().id
+  const electionTimer = setInterval(() => {
+    const choice = pickHub()
+    if (hub?.url === choice.url && hub.connected === true) { lastChoiceId = choice.id; return }
+    if (choice.id !== lastChoiceId && choice.id !== node.id) {
+      // A newly elected relay gets one grace period before it is skipped.
+      lastChoiceId = choice.id
+      hubBlockedUntil.set(choice.id, Date.now() + 15_000)
+      void startHubClient(choice.url)
+      return
+    }
+    const chosen = hub?.url === choice.url ? choice.id : lastChoiceId
+    if (chosen !== node.id && hub?.connected !== true) {
+      hubBlockedUntil.set(chosen, Date.now() + 120_000)
+      log(`hub relay ${chosen} is unreachable; trying the next node`)
+    }
+    lastChoiceId = choice.id
+    void startHubClient(choice.url)
+  }, 7000)
+  electionTimer.unref?.()
 
   pollTimer = setInterval(() => { void refresh() }, 60_000)
   pollTimer.unref?.()
@@ -395,6 +432,7 @@ export async function apply(ctx, config = {}) {
     sessionFabric.dispose()
     toolFabric.dispose()
     provenance.dispose()
+    clearInterval(electionTimer)
     lanLink.dispose()
     void hub?.dispose()
     void localHub?.close()
