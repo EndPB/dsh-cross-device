@@ -258,6 +258,13 @@ export async function apply(ctx, config = {}) {
           return { ...result, repo }
         }
         return result
+      }      case 'sessions.create': {
+        const controller = ctx.get?.('sessionController')
+        if (controller?.create === undefined) throw new Error('this DSH build exposes no sessionController.create')
+        const created = await controller.create({ cwd: input.cwd }, new AbortController().signal)
+        const id = created?.sessionId ?? created?.id ?? created?.session?.id
+        onUpdate()
+        return { id }
       }      case 'nodes':
         return {
           self: buildState().node,

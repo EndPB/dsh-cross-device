@@ -20,7 +20,7 @@ window.__ModuleLoader__.load({
         send: '发送', sending: '发送中…', promptPlaceholder: '向这个共享会话发送消息…',
         noSessions: '还没有共享会话。在会话菜单里选择“共享到节点网络”。',
         noNodes: '还没有其他节点。先在另一台设备上安装并连接同一 GitHub 配置仓库。',
-        localSessions: '本机会话', shareSelected: '共享', space: '共享区', refresh: '刷新',
+        localSessions: '会话', shareSelected: '共享', newSession: '新建会话', space: '共享区', refresh: '刷新',
         connected: '已连接', disconnected: '未连接', save: '保存', saved: '已保存',
         githubRepo: '配置仓库', githubToken: 'GitHub Token（只存本机）', githubSection: 'GitHub 配置服务器', githubLogin: '登录 GitHub', githubSignedIn: '已登录', githubNotSignedIn: '未登录，点按钮自动读取本机 git 凭据', githubRepoAuto: '登录后自动使用 dsh-cross-device-config', hubSection: '连接方式', hubLan: '局域网（默认，自动发现）', hubCustom: '自定义地址（cpolar / 公网）',
         hubUrl: 'Hub 地址（wss://…）', runLocalHub: '在本机启动 Hub', nodeName: '本机节点名',
@@ -38,7 +38,7 @@ window.__ModuleLoader__.load({
         send: 'Send', sending: 'Sending…', promptPlaceholder: 'Message this shared session…',
         noSessions: 'No shared sessions yet. Use “Share to node network” in a session menu.',
         noNodes: 'No other nodes yet. Install the plugin on another device and connect the same GitHub config repo.',
-        localSessions: 'Local sessions', shareSelected: 'Share', space: 'Space', refresh: 'Refresh',
+        localSessions: 'Sessions', shareSelected: 'Share', newSession: 'New session', space: 'Space', refresh: 'Refresh',
         connected: 'Connected', disconnected: 'Disconnected', save: 'Save', saved: 'Saved',
         githubRepo: 'Config repo', githubToken: 'GitHub token (stored locally)', githubSection: 'GitHub config server', githubLogin: 'Sign in to GitHub', githubSignedIn: 'Signed in', githubNotSignedIn: 'Not signed in - the button reuses this machine git credential', githubRepoAuto: 'uses dsh-cross-device-config automatically', hubSection: 'Connection', hubLan: 'LAN (default, auto)', hubCustom: 'Custom URL (cpolar/public)',
         hubUrl: 'Hub URL (wss://…)', runLocalHub: 'Run hub on this node', nodeName: 'This node name',
@@ -308,16 +308,22 @@ window.__ModuleLoader__.load({
           ) : null,
         ),
         h('div', { className: 'nf-card' },
-          h('h2', { className: 'nf-section-title' }, t('localSessions')),
-          h('div', { className: 'nf-list' }, localItems.slice(0, 20).map((item) => h('div', { className: 'nf-item', key: String(item.sessionId) },
-            h('div', { className: 'nf-item-head' },
-              h('div', { className: 'nf-item-title' }, String(item.sessionId)),
-              h('button', { className: 'nf-btn', onClick: (event) => { event.stopPropagation(); void share(String(item.sessionId)) }, disabled: busy === `share-${item.sessionId}` }, t('shareSelected')),
-            ),
+          h('div', { className: 'nf-row' },
+            h('h2', { className: 'nf-section-title' }, t('localSessions')),
+            h('button', { className: 'nf-btn primary', disabled: busy === 'new', onClick: async () => {
+              setBusy('new')
+              try {
+                const created = await rpc('sessions.create', {})
+                await store.refresh(); await store.loadLocalSessions()
+                if (created?.id) ctx.uiWorkspace.openSession(created.id)
+              } catch (error) { store.set({ error: error.message }) } finally { setBusy(undefined) }
+            } }, t('newSession')),
+          ),
+          h('div', { className: 'nf-list' }, localItems.slice(0, 20).map((item) => h('div', { className: 'nf-item', key: String(item.sessionId), role: 'button', tabIndex: 0, onClick: () => ctx.uiWorkspace.openSession(String(item.sessionId)) },
+            h('div', { className: 'nf-item-head' }, h('div', { className: 'nf-item-title' }, String(item.sessionId)), h('span', { className: 'nf-badge self' }, status?.node?.name ?? '')),
             h('div', { className: 'nf-item-sub' }, `${item.cwd ?? ''} · ${item.running ? 'running' : 'idle'}`),
           ))),
-        ),
-      )
+        ),      )
     }
 
     function SettingsPage({ rpc, t }) {
