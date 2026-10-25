@@ -45,6 +45,7 @@ export class LanLink {
         name: String(packet.name ?? ''),
         platform: String(packet.platform ?? ''),
         url: candidates[0] ?? '',
+        hub: packet.hub === true,
         urls: candidates,
         address: remote.address,
         seenAt: Date.now(),
