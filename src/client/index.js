@@ -14,7 +14,7 @@ window.__ModuleLoader__.load({
     const DICTS = {
       zh: {
         nav: '节点网络', title: '节点网络',
-        lead: '同一个会话可以在多台设备上执行工具；这里管理节点、共享会话和来源。',
+        lead: '同一会话可以在多台设备上执行工具。这里只管理节点与来源；会话仍在左侧工作区。', leadNodesOnly: '这里只管理节点、连接与来源。会话请在左侧工作区新建和管理。',
         nodes: '节点', sessions: '共享会话', settings: '设置', online: '在线', offline: '离线',
         coordinator: '当前执行', share: '共享到节点网络', takeover: '在本机接管', messages: '消息',
         send: '发送', sending: '发送中…', promptPlaceholder: '向这个共享会话发送消息…',
@@ -32,7 +32,8 @@ window.__ModuleLoader__.load({
       },
       en: {
         nav: 'Nodes', title: 'Node Network',
-        lead: 'One session can run tools on many devices. Manage nodes, shared sessions, and provenance here.',
+        lead: 'One session can run tools on many devices. This page manages nodes only; sessions stay in the workspace.',
+        leadNodesOnly: 'Nodes, connection and provenance only. Create and manage sessions from the workspace.',
         nodes: 'Nodes', sessions: 'Shared sessions', settings: 'Settings', online: 'Online', offline: 'Offline',
         coordinator: 'Coordinator', share: 'Share to node network', takeover: 'Take over here', messages: 'Messages',
         send: 'Send', sending: 'Sending…', promptPlaceholder: 'Message this shared session…',
@@ -308,7 +309,7 @@ window.__ModuleLoader__.load({
       const localItems = (state.localSessions ?? []).filter((item) => item.origin !== 'subagent' && item.formatStatus !== 'migration-required')
       return h('div', { className: 'nf-root' },
         h('h1', { className: 'nf-title' }, t('title')),
-        h('p', { className: 'nf-lead' }, t('lead')),
+        h('p', { className: 'nf-lead' }, t('leadNodesOnly')),
         h('div', { className: 'nf-row' },
           h(Pill, { online: status?.hub?.connected === true }, `${t('hubUrl')}: ${status?.hub?.connected === true ? t('connected') : t('disconnected')}`),
           h('span', { className: 'nf-muted' }, status?.node?.name ?? ''),
@@ -318,39 +319,8 @@ window.__ModuleLoader__.load({
         state.error ? h('div', { className: 'nf-error' }, state.error) : null,
         h('div', { className: 'nf-grid' },
           h('div', { className: 'nf-card' }, h('h2', { className: 'nf-section-title' }, t('nodes')), h(NodeList, { status, t })),
-          h('div', { className: 'nf-card' }, h('h2', { className: 'nf-section-title' }, t('sessions')), h(SessionList, { state, t, selected, onSelect: setSelected })),
         ),
-        h('div', { className: 'nf-card' },
-          h('h2', { className: 'nf-section-title' }, selectedSession?.title ?? t('session')),
-          selectedSession ? h('div', { className: 'nf-muted' }, `${selectedSession.id} · coordinator ${selectedSession.coordinatorNodeId ?? '?'} · epoch ${selectedSession.epoch ?? 0} · seq ${selectedSession.lastSeq ?? -1}`) : null,
-          selectedSession ? h('div', { className: 'nf-row' }, h('button', { className: 'nf-btn', onClick: () => void takeover(), disabled: busy === 'takeover' }, t('takeover'))) : null,
-          h(Transcript, { events: state.lastEvents, provenanceRecords, t }),
-          selectedSession ? h('div', { className: 'nf-textarea-wrap' },
-            h('textarea', { className: 'nf-textarea', placeholder: t('promptPlaceholder'), value: text, onChange: (event) => setText(event.target.value) }),
-            h('button', { className: 'nf-btn primary', onClick: () => void send(), disabled: busy === 'send' || text.trim() === '' }, busy === 'send' ? t('sending') : t('send')),
-          ) : null,
-        ),
-        h('div', { className: 'nf-card' },
-          h('div', { className: 'nf-row' },
-            h('h2', { className: 'nf-section-title' }, t('localSessions')),
-            h('select', { className: 'nf-input', value: newTarget, onChange: (event) => setNewTarget(event.target.value), style: { maxWidth: '220px' } },
-              h('option', { value: '' }, `${t('newSession')} · ${status?.node?.name ?? ''}`),
-              (status?.peers ?? []).map((peer) => h('option', { key: peer.id, value: peer.id }, `${t('newSession')} · ${peer.name}`)),
-            ),
-            h('button', { className: 'nf-btn primary', disabled: busy === 'new', onClick: async () => {
-              setBusy('new')
-              try {
-                const created = await rpc('sessions.create', { nodeId: newTarget || undefined })
-                await store.refresh(); await store.loadLocalSessions()
-                if (created?.id && (created.nodeId === undefined || created.nodeId === status?.node?.id)) ctx.uiWorkspace.openSession(created.id)
-              } catch (error) { store.set({ error: error.message }) } finally { setBusy(undefined) }
-            } }, t('newSession')),
-          ),
-          h(AllSessions, { rpc, t, onOpen: (row) => {
-            if (row.local) { ctx.uiWorkspace.openSession(row.id); return }
-            void rpc('subscribe', { sessionId: row.id }).then(() => { setSelected(row.id); void store.loadHistory(row.id) }).catch((error) => store.set({ error: error.message }))
-          } }),
-        ),      )
+      )
     }
 
     function SettingsPage({ rpc, t }) {
