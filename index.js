@@ -103,6 +103,8 @@ export async function apply(ctx, config = {}) {
   let reconnectTimer
   let pollTimer
   let disposed = false
+  let hubTarget = ''
+  let hubError = ''
 
   const buildState = () => ({
     node: { id: node.id, name: node.name, slug: node.slug, platform: node.platform, arch: node.arch, fingerprint: publicKeyFingerprint(node.publicKey) },
