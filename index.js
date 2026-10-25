@@ -107,12 +107,14 @@ export async function apply(ctx, config = {}) {
   const buildState = () => ({
     node: { id: node.id, name: node.name, slug: node.slug, platform: node.platform, arch: node.arch, fingerprint: publicKeyFingerprint(node.publicKey) },
     hub: {
-      url: settings.hub.url || registry.hub?.url,
+      url: hub?.url || hubTarget || settings.hub.url || '',
       mode: registry.hub?.mode ?? settings.hub.mode,
       connected: hub?.connected === true,
       state: hub?.state ?? 'idle',
       hubNodeId: hub?.hubNodeId,
-      local: settings.hub.runLocal === true,
+      local: localHub !== undefined,
+      relay: hubTarget,
+      lastError: hubError,
     },
     peers: [...(hub?.peers?.values?.() ?? [])].map((peer) => ({
       id: peer.id,
