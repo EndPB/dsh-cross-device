@@ -19,6 +19,8 @@ import { registerRpc } from './src/host/rpc.js'
 import { desktopCapabilities } from './src/host/capabilities/desktop.js'
 import { androidCapabilities } from './src/host/capabilities/android.js'
 import { slugify } from './src/protocol.js'
+import { GitHubDeviceFlow } from './src/host/github-device.js'
+import { LanLink } from './src/host/lan.js'
 
 export const name = 'dsh-cross-device'
 export const inject = ['tools', 'sessions']
@@ -64,6 +66,8 @@ export async function apply(ctx, config = {}) {
   }
   log(`node ${node.id} ${node.name} (${node.platform}/${node.arch}) fingerprint ${publicKeyFingerprint(node.publicKey)}`)
 
+  const githubFlow = new GitHubDeviceFlow()
+  const lanLink = new LanLink({ nodeId: node.id, name: node.name, platform: node.platform, log }).start()
   const bus = new EventBus({ log })
   const registry = new Registry({ settings, identity, log })
   await registry.sync(true).catch(() => {})
@@ -180,6 +184,7 @@ export async function apply(ctx, config = {}) {
       logger: { info: log, warn: log },
     })
     const urls = lanUrls(localHub.port)
+    lanLink.setHubUrl(urls[0] ?? `ws://127.0.0.1:${localHub.port}`)
     const publicUrl = settings.hub.url || urls[0] || `ws://127.0.0.1:${localHub.port}`
     await registry.publishHub({ url: publicUrl, mode: settings.hub.url ? 'cpolar' : 'lan', hubNodeId: node.id, lanUrls: [`ws://127.0.0.1:${localHub.port}`, ...urls] }).catch((error) => log(`hub publish failed: ${String(error)}`))
     return localHub
@@ -191,6 +196,8 @@ export async function apply(ctx, config = {}) {
       return `ws://127.0.0.1:${localHub.port}`
     }
     if (settings.hub.url) return settings.hub.url
+    const found = await lanLink.waitForHub(6000)
+    if (found !== undefined) return found
     await registry.sync(true).catch(() => {})
     return registry.hub?.url
   }
@@ -238,25 +245,19 @@ export async function apply(ctx, config = {}) {
         onUpdate()
         return sanitizeSettings(settings)
       }
-      case 'github.login': {
-        const { execFile } = await import('node:child_process')
-        const text = await new Promise((resolve, reject) => {
-          const child = execFile('git', ['-c', 'credential.helper=manager', 'credential', 'fill'], { timeout: 20_000 }, (error, stdout) => {
-            if (error) reject(error)
-            else resolve(String(stdout))
-          })
-          child.stdin?.end('protocol=https\nhost=github.com\n\n')
-        })
-        const token = /^password=(.+)$/mu.exec(text)?.[1]?.trim()
-        const login = /^username=(.+)$/mu.exec(text)?.[1]?.trim() ?? ''
-        if (!token) throw Object.assign(new Error('no GitHub credential on this machine; sign in with git once'), { code: 'NO_CREDENTIAL' })
-        const repo = settings.github.repo || (login ? `${login}/dsh-cross-device-config` : '')
-        settings = await store.save({ ...settings, github: { ...settings.github, token, login, repo } })
-        if (registry !== undefined) registry.settings = settings
-        await publishNode()
-        await refresh()
-        onUpdate()
-        return { login, repo, message: `已登录 ${login || 'GitHub'}，配置仓库 ${repo}` }
+      case 'github.start':
+        return githubFlow.start()
+      case 'github.poll': {
+        const result = await githubFlow.poll()
+        if (result.state === 'done') {
+          const repo = settings.github.repo || (result.login ? `${result.login}/dsh-cross-device-config` : '')
+          settings = await store.save({ ...settings, github: { ...settings.github, token: result.token, login: result.login ?? '', repo } })
+          await publishNode()
+          await refresh()
+          onUpdate()
+          return { ...result, repo }
+        }
+        return result
       }      case 'nodes':
         return {
           self: buildState().node,
@@ -338,6 +339,7 @@ export async function apply(ctx, config = {}) {
     sessionFabric.dispose()
     toolFabric.dispose()
     provenance.dispose()
+    lanLink.dispose()
     void hub?.dispose()
     void localHub?.close()
   }, 'dsh-cross-device: lifecycle')

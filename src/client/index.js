@@ -347,11 +347,25 @@ window.__ModuleLoader__.load({
       const login = async () => {
         setBusy(true); setNotice(undefined)
         try {
-          const value = await rpc('github.login', {})
-          setForm({ ...form, repo: value?.repo ?? form.repo, login: value?.login ?? '', hasToken: true })
-          setNotice(value?.message ?? t('githubSignedIn'))
-          await store.refresh()
-        } catch (error) { setNotice(error.message) } finally { setBusy(false) }
+          const start = await rpc('github.start', {})
+          setForm({ ...form, deviceCode: start.userCode, deviceUri: start.verificationUri })
+          try { window.open(start.verificationUri, '_blank', 'noopener') } catch {}
+          setNotice(`${t('githubCode')}: ${start.userCode} · ${start.verificationUri}`)
+          const tick = async () => {
+            const result = await rpc('github.poll', {})
+            if (result?.state === 'done') {
+              setForm((current) => ({ ...current, repo: result.repo ?? current.repo, login: result.login ?? '', hasToken: true, deviceCode: undefined }))
+              setNotice(`${t('githubSignedIn')}: ${result.login ?? 'ok'} · ${result.repo ?? ''}`)
+              await store.refresh()
+              setBusy(false)
+              return
+            }
+            if (result?.state === 'pending') { setTimeout(() => { void tick() }, Math.max(2, result.interval ?? 5) * 1000); return }
+            setNotice(`GitHub: ${result?.state ?? 'error'} ${result?.error ?? ''}`)
+            setBusy(false)
+          }
+          setTimeout(() => { void tick() }, Math.max(2, start.interval ?? 5) * 1000)
+        } catch (error) { setNotice(error.message); setBusy(false) }
       }
       const save = async () => {
         setBusy(true)
