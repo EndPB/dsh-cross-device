@@ -282,6 +282,18 @@ export async function apply(ctx, config = {}) {
           return { ...result, repo }
         }
         return result
+      }      case 'sharedWorkspace': {
+        const { mkdir, readFile, writeFile } = await import('node:fs/promises')
+        const { join } = await import('node:path')
+        const dir = join(settings.dataDir, 'workspace')
+        const marker = join(settings.dataDir, 'workspace.json')
+        await mkdir(dir, { recursive: true })
+        let created = false
+        try { await readFile(marker, 'utf8') } catch {
+          await writeFile(marker, `${JSON.stringify({ path: dir, createdAt: new Date().toISOString() })}\n`, 'utf8')
+          created = true
+        }
+        return { path: dir, created }
       }      case 'sessions.create': {
         const peer = input.nodeId !== undefined && input.nodeId !== ''
           ? [...(hub?.peers?.values?.() ?? [])].find((row) => row.id === input.nodeId || row.slug === input.nodeId)

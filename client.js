@@ -460,7 +460,18 @@ window.__ModuleLoader__.load({
       }, t('share'))
     }
 
+    function ensureSharedWorkspace(ctx) {
+      const connection = ctx.get?.('connection')
+      if (connection?.rpc?.handle === undefined) return
+      const rpc = createRpc(ctx)
+      void rpc('sharedWorkspace', {}).then((value) => {
+        if (value?.created !== true || typeof ctx.workspaces?.create !== 'function') return undefined
+        return ctx.workspaces.create({ path: value.path })
+      }).catch(() => {})
+    }
+
     function register(ctx) {
+      ensureSharedWorkspace(ctx)
       const rpc = createRpc(ctx)
       const t = (key) => {
         const snapshot = ctx.locale.getLocale?.() ?? {}
