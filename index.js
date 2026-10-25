@@ -105,16 +105,24 @@ export async function apply(ctx, config = {}) {
   let disposed = false
   let hubTarget = ''
   let hubError = ''
+  const shownHubUrl = () => {
+    const localUrl = `ws://127.0.0.1:${localHub?.port ?? settings.hub.port ?? 8788}`
+    if (hubTarget === '' || hubTarget === localUrl) return lanUrls(localHub?.port ?? settings.hub.port ?? 8788)[0] ?? hubTarget
+    return hubTarget
+  }
+  const rankOf = (platform) => (platform === 'win32' || platform === 'darwin') ? 0 : platform === 'linux' ? 1 : 2
 
   const buildState = () => ({
     node: { id: node.id, name: node.name, slug: node.slug, platform: node.platform, arch: node.arch, fingerprint: publicKeyFingerprint(node.publicKey) },
     hub: {
-      url: hub?.url || hubTarget || settings.hub.url || '',
+      url: shownHubUrl(),
       mode: registry.hub?.mode ?? settings.hub.mode,
       connected: hub?.connected === true,
       state: hub?.state ?? 'idle',
       hubNodeId: hub?.hubNodeId,
       local: localHub !== undefined,
+      hubCapable: settings.hub.runLocal === true,
+      lanUrl: (lanUrls(localHub?.port ?? settings.hub.port ?? 8788)[0] ?? ''),
       relay: hubTarget,
       lastError: hubError,
     },
@@ -219,7 +227,7 @@ export async function apply(ctx, config = {}) {
       logger: { info: log, warn: log },
     })
     const urls = lanUrls(localHub.port)
-    lanLink.setHubUrl(urls[0], urls); void (urls[0] ?? `ws://127.0.0.1:${localHub.port}`)
+    lanLink.setHubUrl(publicUrl, urls); lanLink.hub = true
     const publicUrl = settings.hub.url || urls[0] || `ws://127.0.0.1:${localHub.port}`
     await registry.publishHub({ url: publicUrl, mode: settings.hub.url ? 'cpolar' : 'lan', hubNodeId: node.id, lanUrls: [`ws://127.0.0.1:${localHub.port}`, ...urls] }).catch((error) => log(`hub publish failed: ${String(error)}`))
     return localHub
@@ -413,14 +421,14 @@ export async function apply(ctx, config = {}) {
   })
   const pickHub = async () => {
     const now = Date.now()
-    const local = { id: node.id, url: localHubUrl() }
-    const candidates = [local]
+    const local = { id: node.id, url: localHubUrl(), rank: rankOf(node.platform) }
+    const candidates = settings.hub.runLocal === true ? [local] : []
     for (const peer of lanLink.livePeers()) {
-      if (peer.url === '') continue
+      if (peer.url === '' || peer.hub !== true) continue
       if ((hubBlockedUntil.get(peer.id) ?? 0) > now) continue
-      candidates.push({ id: peer.id, url: peer.url, urls: peer.urls ?? [peer.url] })
+      candidates.push({ id: peer.id, url: peer.url, urls: peer.urls ?? [peer.url], rank: rankOf(peer.platform) })
     }
-    candidates.sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    candidates.sort((left, right) => (left.rank ?? 9) - (right.rank ?? 9) || String(left.id).localeCompare(String(right.id)))
     // The smallest id wins only when it is actually reachable from here; a
     // VPN/tunnel or firewall failure must not strand the whole node.
     for (const candidate of candidates) {

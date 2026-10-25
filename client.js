@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
         localSessions: 'Sessions', shareSelected: 'Share', newSession: 'New session', space: 'Space', refresh: 'Refresh',
         connected: 'Connected', disconnected: 'Disconnected', save: 'Save', saved: 'Saved',
         githubRepo: 'Config repo', githubToken: 'GitHub token (stored locally)', githubSection: 'GitHub config server', githubLogin: 'Sign in to GitHub', githubSignedIn: 'Signed in', githubNotSignedIn: 'Not signed in - the button reuses this machine git credential', githubRepoAuto: 'uses dsh-cross-device-config automatically', hubSection: 'Connection', hubLan: 'LAN (default, auto)', hubCustom: 'Custom URL (cpolar/public)',
-        hubUrl: 'Hub URL (wss://…)', runLocalHub: 'Run hub on this node', nodeName: 'This node name',
+        hubUrl: 'Hub URL', runLocalHub: 'Run hub on this node', nodeName: 'This node name',
         allowAny: 'Allow any node (local testing only)', capabilities: 'Capabilities', provenance: 'Provenance',
         answeredOn: 'Answered on', toolsOn: 'Tools', from: 'from', you: 'you', load: 'Loading…',
         error: 'Something went wrong', noHub: 'Hub not connected', fingerprint: 'Fingerprint', session: 'Session',

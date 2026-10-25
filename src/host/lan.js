@@ -19,6 +19,7 @@ export class LanLink {
     this.peers = new Map()
     this.senders = new Map()
     this.urls = []
+    this.hub = false
     this.socket = undefined
     this.timer = undefined
   }
@@ -60,7 +61,7 @@ export class LanLink {
 
   announce() {
     if (this.socket === undefined) return
-    const packet = JSON.stringify({ t: 'cd', id: this.nodeId, name: this.name, platform: this.platform, url: this.url, urls: this.urls ?? [] })
+    const packet = JSON.stringify({ t: 'cd', id: this.nodeId, name: this.name, platform: this.platform, url: this.url, urls: this.urls ?? [], hub: this.hub })
     const buffer = Buffer.from(packet)
     const interfaces = this.physical()
     if (interfaces.length === 0) {
