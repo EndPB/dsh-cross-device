@@ -30,11 +30,19 @@ export class LanLink {
       let packet
       try { packet = JSON.parse(String(buffer)) } catch { return }
       if (packet?.t !== 'cd' || typeof packet.id !== 'string' || packet.id === this.nodeId) return
+      // The sender may advertise a virtual/VPN address that the peer cannot
+      // reach. The packet's own source address is always reachable, so it wins.
+      const advertised = typeof packet.url === 'string' ? packet.url : ''
+      const port = /:(\d+)\/?(?:$|\?)/u.exec(advertised)?.[1] ?? '8788'
+      const direct = `ws://${remote.address}:${port}`
+      const extra = Array.isArray(packet.urls) ? packet.urls.filter((value) => typeof value === 'string') : []
+      const candidates = [...new Set([direct, ...extra, advertised].filter((value) => value !== ''))]
       this.peers.set(packet.id, {
         id: packet.id,
         name: String(packet.name ?? ''),
         platform: String(packet.platform ?? ''),
-        url: typeof packet.url === 'string' ? packet.url : '',
+        url: candidates[0] ?? '',
+        urls: candidates,
         address: remote.address,
         seenAt: Date.now(),
       })
