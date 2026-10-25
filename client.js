@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
         localSessions: '会话', shareSelected: '共享', newSession: '新建会话', space: '共享区', refresh: '刷新',
         connected: '已连接', disconnected: '未连接', save: '保存', saved: '已保存',
         githubRepo: '配置仓库', githubToken: 'GitHub Token（只存本机）', githubSection: 'GitHub 配置服务器', githubLogin: '登录 GitHub', githubSignedIn: '已登录', githubNotSignedIn: '未登录，点按钮自动读取本机 git 凭据', githubRepoAuto: '登录后自动使用 dsh-cross-device-config', hubSection: '连接方式', hubLan: '局域网（默认，自动发现）', hubCustom: '自定义地址（cpolar / 公网）',
-        hubUrl: 'Hub 地址（wss://…）', runLocalHub: '在本机启动 Hub', nodeName: '本机节点名',
+        hubUrl: 'Hub 地址', runLocalHub: '在本机启动 Hub', nodeName: '本机节点名',
         allowAny: '允许任意节点（仅本地测试）', capabilities: '能力', provenance: '来源记录',
         answeredOn: '回答于', toolsOn: '工具', from: '来自', you: '你', load: '加载中…',
         error: '出错了', noHub: '未连接 Hub', fingerprint: '指纹', session: '会话',
