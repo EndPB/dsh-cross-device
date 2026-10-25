@@ -164,7 +164,7 @@ window.__ModuleLoader__.load({
     }
 
     function Pill({ online, children }) {
-      return h('span', { className: 'nf-pill' }, h('span', { className: `nf-dot ${online ? 'online' : ''}` }), children)
+      return h('span', { className: 'nf-pill', style: { whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' } }, h('span', { className: `nf-dot ${online ? 'online' : ''}` }), children)
     }
 
     function NodeList({ status, t }) {

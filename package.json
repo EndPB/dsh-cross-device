@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-cross-device",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
   "description": "Distributed DSH node fabric: cross-device sessions, remote tools, and device provenance",
   "type": "module",

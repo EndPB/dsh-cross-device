@@ -5,6 +5,7 @@
  * fabric, provenance, session sharing, and the local Web UI channel.
  */
 import { networkInterfaces } from 'node:os'
+import { connect as netConnect } from 'node:net'
 import { defaultSettings, SettingsStore } from './src/host/settings.js'
 import { ensureIdentity, publicKeyFingerprint } from './src/host/identity.js'
 import { Registry } from './src/host/registry.js'
@@ -393,23 +394,46 @@ export async function apply(ctx, config = {}) {
   // takes over, so no single desktop is required for the network to exist.
   const localHubUrl = () => `ws://127.0.0.1:${localHub?.port ?? settings.hub.port ?? 8788}`
   const hubBlockedUntil = new Map()
-  const pickHub = () => {
+  const reachable = (url) => new Promise((resolve) => {
+    let done = false
+    const finish = (value) => { if (!done) { done = true; try { socket.destroy() } catch {}; resolve(value) } }
+    let socket
+    try {
+      const parsed = new URL(url)
+      socket = netConnect({ host: parsed.hostname, port: Number(parsed.port || 8788) })
+    } catch { resolve(false); return }
+    socket.setTimeout(1500)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+  })
+  const pickHub = async () => {
     const now = Date.now()
-    const candidates = [{ id: node.id, url: localHubUrl() }]
+    const local = { id: node.id, url: localHubUrl() }
+    const candidates = [local]
     for (const peer of lanLink.livePeers()) {
       if (peer.url === '') continue
       if ((hubBlockedUntil.get(peer.id) ?? 0) > now) continue
-      candidates.push({ id: peer.id, url: peer.url })
+      candidates.push({ id: peer.id, url: peer.url, urls: peer.urls ?? [peer.url] })
     }
     candidates.sort((left, right) => String(left.id).localeCompare(String(right.id)))
-    return candidates[0]
+    // The smallest id wins only when it is actually reachable from here; a
+    // VPN/tunnel or firewall failure must not strand the whole node.
+    for (const candidate of candidates) {
+      for (const url of candidate.urls ?? [candidate.url]) {
+        if (await reachable(url)) return { id: candidate.id, url }
+      }
+      if (candidate.id !== node.id) hubBlockedUntil.set(candidate.id, Date.now() + 60_000)
+    }
+    return local
   }
 
   await startLocalHub()
-  await startHubClient(pickHub().url)
-  let lastChoiceId = pickHub().id
-  const electionTimer = setInterval(() => {
-    const choice = pickHub()
+  const firstChoice = await pickHub()
+  await startHubClient(firstChoice.url)
+  let lastChoiceId = firstChoice.id
+  const electionTimer = setInterval(async () => {
+    const choice = await pickHub()
     if (hub?.url === choice.url && hub.connected === true) { lastChoiceId = choice.id; return }
     if (choice.id !== lastChoiceId && choice.id !== node.id) {
       // A newly elected relay gets one grace period before it is skipped.
