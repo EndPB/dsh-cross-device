@@ -222,15 +222,26 @@ export async function apply(ctx, config = {}) {
       if (query?.readSession === undefined) throw new Error('sessionQuery is unavailable')
       const id = String(params?.sessionId ?? '')
       const sinceTime = Number(params?.sinceTime ?? 0)
+      const limit = Math.min(Math.max(Number(params?.limit ?? 0), 0), 2000)
+      const fromSeq = Number(params?.fromSeq ?? 0)
       const read = await query.readSession(id)
       const all = Array.isArray(read?.events) ? read.events : []
       // Timestamp versioning: the caller names the newest event it already has
-      // and only receives the tail. One idle session costs one filtered array.
-      const events = sinceTime > 0
+      // and only receives the tail. Paging keeps one WebSocket frame small.
+      let events = sinceTime > 0
         ? all.filter((event) => Number(event?.time ?? 0) > sinceTime)
         : all
+      if (limit > 0) {
+        events = events.filter((event) => Number(event?.seq ?? 0) >= fromSeq).slice(0, limit)
+      }
       const latestTime = all.reduce((max, event) => Math.max(max, Number(event?.time ?? 0)), 0)
-      return { manifest: { header: read?.session }, events, latestTime, title: undefined }
+      return {
+        manifest: { header: read?.session },
+        events,
+        latestTime,
+        total: all.length,
+        more: limit > 0 && events.length === limit,
+      }
     }
     if (method === 'session.list') return { items: await listLocalSessions() }
     if (method === 'sessions.create') return await createLocalSession(params?.cwd)

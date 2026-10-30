@@ -103,9 +103,27 @@ export class SessionMirror {
     return this.origins.get(localId)
   }
 
+  /**
+   * Page through a peer's log. A big session would otherwise exceed the
+   * WebSocket frame limit and drop the whole connection.
+   */
   async snapshot(peerId, sessionId, sinceTime) {
-    const value = await this.hub.call(peerId, 'session.snapshot', { sessionId, sinceTime }, { timeoutMs: 20_000 })
-    return value === undefined || value === null ? EMPTY : value
+    const events = []
+    let manifest
+    let latestTime = 0
+    let fromSeq = 0
+    for (let page = 0; page < 1000; page += 1) {
+      const value = await this.hub.call(peerId, 'session.snapshot',
+        { sessionId, sinceTime, fromSeq, limit: 400 }, { timeoutMs: 30_000 })
+      if (value === undefined || value === null) break
+      manifest = manifest ?? value.manifest
+      latestTime = Math.max(latestTime, Number(value.latestTime ?? 0))
+      const chunk = Array.isArray(value.events) ? value.events : []
+      events.push(...chunk)
+      if (value.more !== true || chunk.length === 0) break
+      fromSeq = Number(chunk[chunk.length - 1]?.seq ?? 0) + 1
+    }
+    return events.length === 0 && manifest === undefined ? EMPTY : { manifest, events, latestTime }
   }
 
   async appendInto(localId, events) {
