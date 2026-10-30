@@ -122,6 +122,7 @@ export async function apply(ctx, config = {}) {
       hubNodeId: hub?.hubNodeId,
       local: localHub !== undefined,
       hubCapable: settings.hub.runLocal === true,
+      runLocal: settings.hub.runLocal === true,
       lanUrl: (lanUrls(localHub?.port ?? settings.hub.port ?? 8788)[0] ?? ''),
       relay: hubTarget,
       lastError: hubError,
@@ -433,7 +434,7 @@ export async function apply(ctx, config = {}) {
     // VPN/tunnel or firewall failure must not strand the whole node.
     for (const candidate of candidates) {
       for (const url of candidate.urls ?? [candidate.url]) {
-        if (await reachable(url)) return { id: candidate.id, url }
+        if (await reachable(url)) return { id: candidate.id, url, rank: candidate.rank ?? 9 }
       }
       if (candidate.id !== node.id) hubBlockedUntil.set(candidate.id, Date.now() + 60_000)
     }
