@@ -466,6 +466,7 @@ export async function apply(ctx, config = {}) {
   else log('no hub yet; waiting for a LAN beacon')
   const electionTimer = setInterval(async () => {
     if (hub === undefined || hub.connected !== true) {
+      if (hub !== undefined && hub.state === 'connecting') return
       const fallback = (await betterHub()) ?? (localHub !== undefined ? localUrl : undefined)
       if (fallback !== undefined) { log(`retry hub ${fallback}`); void startHubClient(fallback) }
       return
