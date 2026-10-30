@@ -36,6 +36,7 @@ export class SessionMirror {
     this.syncedAt = 0
     this.failures = new Set()
     this.recent = []
+    this.pending = new Map()
   }
 
   baseDir() {
@@ -126,7 +127,26 @@ export class SessionMirror {
     return events.length === 0 && manifest === undefined ? EMPTY : { manifest, events, latestTime }
   }
 
+  /** The live session, when this device already has the copy open. */
+  liveSession(localId) {
+    return this.ctx.get?.('sessions')?.get?.(localId)
+  }
+
+  /**
+   * Append to a mirrored session. A copy that is currently open in this process
+   * owns the write handle, so the live session is the only legal writer; only
+   * when nothing has it open does the persistence handle get used.
+   */
   async appendInto(localId, events) {
+    const live = this.liveSession(localId)
+    if (live?.appendEvents !== undefined) {
+      await live.appendEvents(events)
+      return
+    }
+    if (live?.append !== undefined) {
+      await live.append(events)
+      return
+    }
     const persistence = this.ctx.get?.('sessionPersistence')
     if (persistence?.open === undefined) throw new Error('sessionPersistence.open is unavailable')
     const handle = await persistence.open(localId, 'write')
@@ -135,6 +155,17 @@ export class SessionMirror {
       await handle.flush()
     } finally {
       try { await handle.close() } catch {}
+    }
+  }
+
+  /** Retry appends that lost the race against an open session. */
+  async flushPending() {
+    if (this.pending.size === 0) return
+    for (const [localId, events] of [...this.pending]) {
+      try {
+        await this.appendInto(localId, events)
+        this.pending.delete(localId)
+      } catch {}
     }
   }
 
@@ -181,7 +212,15 @@ export class SessionMirror {
     const latestTime = Number(snap.latestTime ?? 0) || this.maxTime(events) || sinceTime
     if (current !== undefined) {
       if (events.length > 0) {
-        await this.appendInto(current.localId, events)
+        try {
+          await this.appendInto(current.localId, events)
+        } catch (error) {
+          // The copy is open and busy right now: keep the tail for the next pass
+          // instead of losing it or racing the owning handle.
+          const queued = this.pending.get(current.localId) ?? []
+          this.pending.set(current.localId, [...queued, ...events])
+          return current.localId
+        }
         this.syncedAt = Math.max(this.syncedAt, latestTime)
         this.note(`merged ${events.length} event(s) into ${current.localId} (${key})`)
       }
@@ -216,6 +255,7 @@ export class SessionMirror {
     if (this.busy || this.hub === undefined || this.hub.connected !== true) return
     this.busy = true
     await this.load()
+    await this.flushPending()
     const persistence = this.ctx.get?.('sessionPersistence')
     if (persistence?.stat !== undefined) {
       for (const [key, value] of [...this.local]) {
