@@ -340,7 +340,7 @@ window.__ModuleLoader__.load({
           hasToken: gh.hasToken === true,
           mode: status.hub?.mode === 'custom' ? 'custom' : 'lan',
           hubUrl: status.hub?.url ?? '',
-          runLocal: status.hub?.local ?? status.isDesktop !== false,
+          runLocal: status.hub?.runLocal === true,
           allowAny: status.hub?.allowAny === true,
           nodeName: status.node?.name ?? '',
         })
