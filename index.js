@@ -247,6 +247,7 @@ export async function apply(ctx, config = {}) {
   }
 
   const publishNode = async () => {
+    if (settings.github.token === '') return
     await registry.publishNode({
       name: node.name,
       slug: node.slug,
@@ -261,11 +262,6 @@ export async function apply(ctx, config = {}) {
 
   const refresh = async () => {
     if (disposed) return
-    await registry.sync(true).catch(() => {})
-    const url = settings.hub.runLocal ? `ws://127.0.0.1:${localHub?.port ?? settings.hub.port}` : settings.hub.url || registry.hub?.url
-    if (url && (hub === undefined || hub.url !== url || hub.connected === false)) {
-      await startHubClient(url)
-    }
     bus.publish('state', buildState())
   }
 
@@ -441,29 +437,28 @@ export async function apply(ctx, config = {}) {
     return local
   }
 
-  await startLocalHub()
-  const firstChoice = await pickHub()
-  await startHubClient(firstChoice.url)
-  let lastChoiceId = firstChoice.id
+  if (settings.hub.runLocal === true) await startLocalHub()
+  const localUrl = localHubUrl()
+  const betterHub = async () => {
+    const mine = rankOf(node.platform)
+    const peers = lanLink.livePeers()
+      .filter((row) => row.hub === true && row.url !== '' && (localHub === undefined || rankOf(row.platform) < mine))
+      .sort((a, b) => rankOf(a.platform) - rankOf(b.platform))
+    for (const peer of peers) if (await reachable(peer.url)) return peer.url
+    return undefined
+  }
+  const firstHub = (await betterHub()) ?? (localHub !== undefined ? localUrl : undefined)
+  if (firstHub !== undefined) await startHubClient(firstHub)
+  else log('no hub yet; waiting for a LAN beacon')
   const electionTimer = setInterval(async () => {
-    const choice = await pickHub()
-    if (hub?.url === choice.url && hub.connected === true) { lastChoiceId = choice.id; return }
-    if (choice.id !== lastChoiceId && choice.id !== node.id) {
-      // A newly elected relay gets one grace period before it is skipped.
-      lastChoiceId = choice.id
-      hubBlockedUntil.set(choice.id, Date.now() + 15_000)
-      void startHubClient(choice.url)
+    if (hub === undefined || hub.connected !== true) {
+      const fallback = (await betterHub()) ?? (localHub !== undefined ? localUrl : undefined)
+      if (fallback !== undefined) { log(`retry hub ${fallback}`); void startHubClient(fallback) }
       return
     }
-    const chosen = hub?.url === choice.url ? choice.id : lastChoiceId
-    if (chosen !== node.id && hub?.connected !== true) {
-      hubBlockedUntil.set(chosen, Date.now() + 120_000)
-      log(`hub relay ${chosen} is unreachable; trying the next node`)
-    }
-    lastChoiceId = choice.id
-    void startHubClient(choice.url)
-  }, 7000)
-  electionTimer.unref?.()
+    const better = await betterHub()
+    if (better !== undefined && better !== hub.url) { log(`better hub ${better}`); void startHubClient(better) }
+  }, 15000)
 
   pollTimer = setInterval(() => { void refresh() }, 60_000)
   pollTimer.unref?.()
