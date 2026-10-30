@@ -294,8 +294,9 @@ export async function apply(ctx, config = {}) {
           provenance: { ...settings.provenance, ...(input.provenance ?? {}) },
           node: { ...settings.node, ...(input.node ?? {}), id: node.id, publicKey: node.publicKey, privateKey: node.privateKey },
         })
-        await publishNode()
-        await refresh()
+        node.name = settings.node.name
+        node.slug = settings.node.slug
+        log(`node renamed to ${node.name}`)
         onUpdate()
         return sanitizeSettings(settings)
       }

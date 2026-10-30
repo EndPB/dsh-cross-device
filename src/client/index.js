@@ -469,13 +469,17 @@ window.__ModuleLoader__.load({
     }
 
     function ensureSharedWorkspace(ctx) {
-      const connection = ctx.get?.('connection')
-      if (connection?.rpc?.handle === undefined) return
       const rpc = createRpc(ctx)
-      void rpc('sharedWorkspace', {}).then((value) => {
-        if (value?.created !== true || typeof ctx.workspaces?.create !== 'function') return undefined
-        return ctx.workspaces.create({ path: value.path })
-      }).catch(() => {})
+      let tries = 0
+      const attempt = () => {
+        tries += 1
+        if (typeof ctx.workspaces?.create !== 'function') { if (tries < 10) setTimeout(attempt, 1500); return }
+        void rpc('sharedWorkspace', {}).then((value) => {
+          if (value?.created !== true) return undefined
+          return ctx.workspaces.create({ path: value.path })
+        }).catch(() => { if (tries < 10) setTimeout(attempt, 1500) })
+      }
+      setTimeout(attempt, 1200)
     }
 
     function register(ctx) {
