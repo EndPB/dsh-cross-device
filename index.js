@@ -196,6 +196,7 @@ export async function apply(ctx, config = {}) {
         running: running.get(id) === true,
         rev: snapshot.revision === undefined ? undefined : String(snapshot.revision),
         bytes: snapshot.sizeBytes,
+        origin: mirror.originOf(id),
         node: node.name,
         nodeId: node.id,
         local: true,

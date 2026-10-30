@@ -1,29 +1,24 @@
 /**
- * Mirror peer sessions into this node's own store, so a session created on one
- * device shows up (and opens) on every other device in the same workspace.
+ * Mirror the shared workspace across devices.
  *
- * DSH sessions are per-device files; there is no shared store to point at. The
- * mirror therefore keeps a local copy: one local session per remote session,
- * created once, then appended as the remote log grows.
- *
- * Versioning is by timestamp, in two scopes:
- *   - the shared workspace carries one timestamp: the newest event time seen
- *     across every mirrored session (`syncedAt`);
- *   - each mirrored session carries its own timestamp: the newest event time
- *     already written into its local copy (`time`).
- * A peer only has to hand over events newer than `time`, so a pass over ten
- * idle sessions transfers nothing.
- *
- * Mirrors must never mirror each other: a copy is created with `cwd` inside
- * `<dataDir>/workspace`, and a row whose cwd is such a workspace is skipped, so
- * desktop -> tablet -> desktop cannot breed copies of copies.
+ * Rules:
+ *   - Only sessions whose cwd is a shared workspace take part. A session in a
+ *     private project never leaves its device.
+ *   - A session's identity is its ORIGIN: `{nodeId, sessionId}` of the device
+ *     that created it. Every copy carries that origin (see `origins` in
+ *     mirror.json), so a copy of a copy is still the same session and can never
+ *     breed a new one.
+ *   - The timestamp is the version: each mirrored session remembers the newest
+ *     event time it already holds and the peer only sends the newer tail. When
+ *     both sides advanced, the tails are unioned (git-like merge), never
+ *     overwritten and never duplicated.
  */
 import { materializeSession } from './materialize.js'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const EMPTY = Object.freeze({ events: [], latestTime: 0 })
-const MIRROR_CWD = /cross-device[\\/]workspace/iu
+const SHARED_CWD = /cross-device[\\/]workspace/iu
 
 export class SessionMirror {
   constructor({ ctx, hub, settings, node, log = console }) {
@@ -32,13 +27,14 @@ export class SessionMirror {
     this.settings = settings
     this.node = node
     this.log = log
-    // `${peerId}:${remoteId}` -> { localId, time, seq, rev }
+    // `${originNode}:${originSession}` -> { localId, time, seq, rev }
     this.local = new Map()
+    // localId -> { nodeId, sessionId }
+    this.origins = new Map()
     this.busy = false
     this.loaded = false
     this.syncedAt = 0
     this.failures = new Set()
-    /** Ring of human-readable activity lines, shown in the node page. */
     this.recent = []
   }
 
@@ -60,7 +56,6 @@ export class SessionMirror {
     this.log(text)
   }
 
-  /** Log each distinct failure once; a poll loop must not flood the log. */
   report(message) {
     if (this.failures.has(message)) return
     this.failures.add(message)
@@ -81,15 +76,20 @@ export class SessionMirror {
           rev: value.rev === undefined ? undefined : String(value.rev),
         })
       }
+      for (const [localId, origin] of Object.entries(raw?.origins ?? {})) {
+        if (origin?.nodeId === undefined) continue
+        this.origins.set(localId, { nodeId: String(origin.nodeId), sessionId: String(origin.sessionId ?? '') })
+      }
       this.syncedAt = Number(raw?.syncedAt ?? 0)
     } catch {}
   }
 
   async save() {
     const payload = {
-      version: 1,
+      version: 2,
       syncedAt: this.syncedAt,
       sessions: Object.fromEntries(this.local),
+      origins: Object.fromEntries(this.origins),
     }
     try {
       await mkdir(this.baseDir(), { recursive: true })
@@ -99,12 +99,15 @@ export class SessionMirror {
     }
   }
 
+  originOf(localId) {
+    return this.origins.get(localId)
+  }
+
   async snapshot(peerId, sessionId, sinceTime) {
     const value = await this.hub.call(peerId, 'session.snapshot', { sessionId, sinceTime }, { timeoutMs: 20_000 })
     return value === undefined || value === null ? EMPTY : value
   }
 
-  /** Append new events to an existing mirrored session. */
   async appendInto(localId, events) {
     const persistence = this.ctx.get?.('sessionPersistence')
     if (persistence?.open === undefined) throw new Error('sessionPersistence.open is unavailable')
@@ -125,22 +128,22 @@ export class SessionMirror {
     return events.reduce((max, event) => Math.max(max, Number(event.seq ?? 0)), 0)
   }
 
-  isMirrorRow(row) {
-    const cwd = String(row?.cwd ?? '')
-    return cwd !== '' && MIRROR_CWD.test(cwd)
+  isSharedRow(row) {
+    return SHARED_CWD.test(String(row?.cwd ?? ''))
+  }
+
+  keyOf(peerId, row) {
+    const origin = row?.origin
+    if (origin?.nodeId && origin?.sessionId) return `${origin.nodeId}:${origin.sessionId}`
+    return `${peerId}:${String(row?.id ?? '')}`
   }
 
   async ensure(peerId, row) {
     const remoteId = String(row?.id ?? '')
     if (remoteId === '') return undefined
-    const key = `${peerId}:${remoteId}`
+    const key = this.keyOf(peerId, row)
     const known = this.local.get(key)
     if (known !== undefined && row?.rev !== undefined && known.rev === String(row.rev)) return known.localId
-    if (known !== undefined) {
-      const persistence = this.ctx.get?.('sessionPersistence')
-      const exists = await persistence?.stat?.(known.localId).catch(() => undefined)
-      if (exists === undefined) this.local.delete(key)
-    }
     const current = this.local.get(key)
     const sinceTime = current?.time ?? 0
     const snap = await this.snapshot(peerId, remoteId, sinceTime)
@@ -153,7 +156,7 @@ export class SessionMirror {
       if (events.length > 0) {
         await this.appendInto(current.localId, events)
         this.syncedAt = Math.max(this.syncedAt, latestTime)
-        this.note(`streamed ${events.length} event(s) into ${current.localId} from ${remoteId}`)
+        this.note(`merged ${events.length} event(s) into ${current.localId} (${key})`)
       }
       current.time = latestTime
       current.seq = Math.max(current.seq, this.maxSeq(events))
@@ -176,8 +179,9 @@ export class SessionMirror {
       seq: this.maxSeq(events),
       rev: row?.rev === undefined ? undefined : String(row.rev),
     })
+    this.origins.set(localId, row?.origin ?? { nodeId: peerId, sessionId: remoteId })
     this.syncedAt = Math.max(this.syncedAt, latestTime)
-    this.note(`mirrored ${remoteId} -> ${localId} (${events.length} events)`)
+    this.note(`mirrored ${key} -> ${localId} (${events.length} events)`)
     return localId
   }
 
@@ -185,21 +189,19 @@ export class SessionMirror {
     if (this.busy || this.hub === undefined || this.hub.connected !== true) return
     this.busy = true
     await this.load()
-    // Forget mappings whose local copy no longer exists (the workspace was
-    // cleaned by hand, or the session was deleted from the UI).
     const persistence = this.ctx.get?.('sessionPersistence')
     if (persistence?.stat !== undefined) {
       for (const [key, value] of [...this.local]) {
         const alive = await persistence.stat(value.localId).catch(() => undefined)
-        if (alive === undefined) this.local.delete(key)
+        if (alive === undefined) {
+          this.local.delete(key)
+          this.origins.delete(value.localId)
+        }
       }
     }
-    let peers = 0
-    let skipped = 0
     try {
       for (const peer of this.hub.peers.values()) {
         if (this.node !== undefined && peer.id === this.node.id) continue
-        peers += 1
         let page
         try {
           page = await this.hub.call(peer.id, 'session.list', {}, { timeoutMs: 8_000 })
@@ -208,7 +210,7 @@ export class SessionMirror {
           continue
         }
         for (const row of page?.items ?? []) {
-          if (this.isMirrorRow(row)) { skipped += 1; continue }
+          if (!this.isSharedRow(row)) continue
           try {
             await this.ensure(peer.id, row)
           } catch (error) {
@@ -216,9 +218,6 @@ export class SessionMirror {
           }
         }
       }
-      if (peers === 0) this.note('no peers online')
-      else this.syncedAt = Math.max(this.syncedAt, 0)
-      if (skipped > 0) this.failures.delete('loop')
     } finally {
       await this.save()
       this.busy = false
