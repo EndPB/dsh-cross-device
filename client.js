@@ -514,15 +514,11 @@ window.__ModuleLoader__.load({
         { name: 'conversation.chat.turnTail', id: 'node-fabric-provenance', order: 35, label: () => t('provenance') },
         (props) => h(ProvenanceTurnTail, { rpc, sessionId: props.sessionId, seq: props.seq, t }),
       ))
-      ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register(
-        { name: 'sidebar.workspaces.session.menu.item', id: 'node-fabric-share', order: 350, label: () => t('share') },
-        (props) => h(ShareMenuItem, { rpc, sessionId: props.sessionId, displayTitle: props.displayTitle, t, useMenuOpenState: props.useMenuOpenState }),
-      ))
     }
 
     return {
       name: '@local/dsh-cross-device',
-      inject: ['slots', 'connection', 'locale', 'layout', 'uiWorkspace'],
+      inject: ['slots', 'connection', 'locale', 'layout', 'uiWorkspace', 'workspaces'],
       apply: register,
     }
   },
