@@ -105,6 +105,7 @@ export async function apply(ctx, config = {}) {
   let disposed = false
   let hubTarget = ''
   let hubError = ''
+  let hubAttempts = 0
   const shownHubUrl = () => {
     const localUrl = `ws://127.0.0.1:${localHub?.port ?? settings.hub.port ?? 8788}`
     if (hubTarget === '' || hubTarget === localUrl) return lanUrls(localHub?.port ?? settings.hub.port ?? 8788)[0] ?? hubTarget
@@ -116,6 +117,9 @@ export async function apply(ctx, config = {}) {
     node: { id: node.id, name: node.name, slug: node.slug, platform: node.platform, arch: node.arch, fingerprint: publicKeyFingerprint(node.publicKey) },
     hub: {
       url: shownHubUrl(),
+      localPort: localHub?.port ?? 0,
+      attempts: hubAttempts,
+      lastError: hubError,
       mode: registry.hub?.mode ?? settings.hub.mode,
       connected: hub?.connected === true,
       state: hub?.state ?? 'idle',
