@@ -4,7 +4,9 @@
  * Composes the node identity, GitHub registry, hub client/server, capability
  * fabric, provenance, session sharing, and the local Web UI channel.
  */
-import { networkInterfaces } from 'node:os'
+import { networkInterfaces, homedir } from 'node:os'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname, join as joinPath } from 'node:path'
 import { connect as netConnect } from 'node:net'
 import { defaultSettings, SettingsStore } from './src/host/settings.js'
 import { ensureIdentity, publicKeyFingerprint } from './src/host/identity.js'
@@ -26,8 +28,11 @@ import { LanLink } from './src/host/lan.js'
 export const name = 'dsh-cross-device'
 export const inject = ['tools', 'sessions']
 
+const LOG_FILE = joinPath(process.env.DSH_HOME || joinPath(homedir(), '.dsh'), 'cross-device', 'debug.log')
 function log(message) {
-  console.log(`[cross-device] ${message}`)
+  const line = `${new Date().toISOString()} [cross-device] ${message}`
+  console.log(line)
+  try { mkdirSync(dirname(LOG_FILE), { recursive: true }); appendFileSync(LOG_FILE, line + '\n') } catch {}
 }
 
 function lanUrls(port) {
