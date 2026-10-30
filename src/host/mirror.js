@@ -185,6 +185,15 @@ export class SessionMirror {
     if (this.busy || this.hub === undefined || this.hub.connected !== true) return
     this.busy = true
     await this.load()
+    // Forget mappings whose local copy no longer exists (the workspace was
+    // cleaned by hand, or the session was deleted from the UI).
+    const persistence = this.ctx.get?.('sessionPersistence')
+    if (persistence?.stat !== undefined) {
+      for (const [key, value] of [...this.local]) {
+        const alive = await persistence.stat(value.localId).catch(() => undefined)
+        if (alive === undefined) this.local.delete(key)
+      }
+    }
     let peers = 0
     let skipped = 0
     try {
