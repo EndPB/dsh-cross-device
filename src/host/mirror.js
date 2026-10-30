@@ -150,26 +150,30 @@ export class SessionMirror {
     return SHARED_CWD.test(String(row?.cwd ?? ''))
   }
 
-  keyOf(peerId, row) {
-    const origin = row?.origin
-    if (origin?.nodeId && origin?.sessionId) return `${origin.nodeId}:${origin.sessionId}`
-    // A copy keeps the source header's createdAt through materializeSession, so
-    // createdAt is the same on every copy of one logical session. Peers that do
-    // not report an origin are still deduplicated by this stable birth stamp.
+  /** Identity of a mirrored session: its birth stamp, on every device alike. */
+  keyOf(row) {
     const createdAt = Number(row?.createdAt ?? 0)
-    if (createdAt > 0) return `t${createdAt}`
-    return `${peerId}:${String(row?.id ?? '')}`
+    return createdAt > 0 ? `t${createdAt}` : ''
   }
 
   async ensure(peerId, row) {
     const remoteId = String(row?.id ?? '')
     if (remoteId === '') return undefined
-    const key = this.keyOf(peerId, row)
-    const known = this.local.get(key)
-    if (known !== undefined && row?.rev !== undefined && known.rev === String(row.rev)) return known.localId
-    const current = this.local.get(key)
+    let key = this.keyOf(row)
+    let current = key === '' ? undefined : this.local.get(key)
+    if (current !== undefined && row?.rev !== undefined && current.rev === String(row.rev)) return current.localId
     const sinceTime = current?.time ?? 0
-    const snap = await this.snapshot(peerId, remoteId, sinceTime)
+    const snap = await this.snapshot(peerId, remoteId, key === '' ? 0 : sinceTime)
+    if (key === '') {
+      // The birth stamp lives in the session header, which every copy carries,
+      // so it works even against a peer that reports no extra fields.
+      const born = Number(snap?.manifest?.header?.createdAt ?? 0)
+      if (born > 0) {
+        key = `t${born}`
+        current = this.local.get(key)
+      }
+    }
+    if (key === '') throw new Error('session header has no createdAt')
     let events = Array.isArray(snap.events) ? snap.events : []
     if (current !== undefined && current.seq >= 0) {
       events = events.filter((event) => Number(event.seq ?? 0) > current.seq)
