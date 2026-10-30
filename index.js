@@ -114,7 +114,7 @@ export async function apply(ctx, config = {}) {
   let hubAttempts = 0
   // Filled by the mirror pass; read by buildState, so it must exist before the
   // first state publication.
-  const mirrorStats = { syncedAt: 0, count: 0, sharedCwd: '' }
+  const mirrorStats = { syncedAt: 0, count: 0, sharedCwd: '', recent: [] }
   const shownHubUrl = () => {
     const localUrl = `ws://127.0.0.1:${localHub?.port ?? settings.hub.port ?? 8788}`
     if (hubTarget === '' || hubTarget === localUrl) return lanUrls(localHub?.port ?? settings.hub.port ?? 8788)[0] ?? hubTarget
@@ -458,9 +458,7 @@ export async function apply(ctx, config = {}) {
         return buildState()
       case 'mirror.sync': {
         await mirror.syncAll()
-        mirrorStats.syncedAt = mirror.syncedAt
-        mirrorStats.count = mirror.local.size
-        mirrorStats.sharedCwd = mirror.sharedCwd()
+        Object.assign(mirrorStats, mirror.summary())
         onUpdate()
         return { ...mirrorStats }
       }
@@ -526,12 +524,10 @@ export async function apply(ctx, config = {}) {
   // newest event time, and the pass publishes the workspace-wide maximum.
   const runMirror = async () => {
     await mirror.syncAll()
-    mirrorStats.syncedAt = mirror.syncedAt
-    mirrorStats.count = mirror.local.size
-    mirrorStats.sharedCwd = mirror.sharedCwd()
+    Object.assign(mirrorStats, mirror.summary())
   }
   void runMirror().then(onUpdate).catch(() => {})
-  const mirrorTimer = setInterval(() => { void runMirror().then(onUpdate).catch(() => {}) }, 8_000)
+  const mirrorTimer = setInterval(() => { void runMirror().then(onUpdate).catch(() => {}) }, 3_000)
   mirrorTimer.unref?.()
   const electionTimer = setInterval(async () => {
     if (hub === undefined || hub.connected !== true) {

@@ -13,12 +13,17 @@
  *     already written into its local copy (`time`).
  * A peer only has to hand over events newer than `time`, so a pass over ten
  * idle sessions transfers nothing.
+ *
+ * Mirrors must never mirror each other: a copy is created with `cwd` inside
+ * `<dataDir>/workspace`, and a row whose cwd is such a workspace is skipped, so
+ * desktop -> tablet -> desktop cannot breed copies of copies.
  */
 import { materializeSession } from './materialize.js'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const EMPTY = Object.freeze({ events: [], latestTime: 0 })
+const MIRROR_CWD = /cross-device[\\/]workspace/iu
 
 export class SessionMirror {
   constructor({ ctx, hub, settings, node, log = console }) {
@@ -33,6 +38,8 @@ export class SessionMirror {
     this.loaded = false
     this.syncedAt = 0
     this.failures = new Set()
+    /** Ring of human-readable activity lines, shown in the node page. */
+    this.recent = []
   }
 
   baseDir() {
@@ -45,6 +52,19 @@ export class SessionMirror {
 
   stateFile() {
     return join(this.baseDir(), 'mirror.json')
+  }
+
+  note(text) {
+    this.recent.push({ t: Date.now(), text })
+    if (this.recent.length > 60) this.recent.splice(0, this.recent.length - 60)
+    this.log(text)
+  }
+
+  /** Log each distinct failure once; a poll loop must not flood the log. */
+  report(message) {
+    if (this.failures.has(message)) return
+    this.failures.add(message)
+    this.note(message)
   }
 
   async load() {
@@ -79,21 +99,9 @@ export class SessionMirror {
     }
   }
 
-  /** Log each distinct failure once; a 10s poll must not flood the log. */
-  report(message) {
-    if (this.failures.has(message)) return
-    this.failures.add(message)
-    this.log(message)
-  }
-
   async snapshot(peerId, sessionId, sinceTime) {
-    const params = { sessionId, sinceTime }
-    const value = await this.hub.call(peerId, 'session.snapshot', params, { timeoutMs: 20_000 })
+    const value = await this.hub.call(peerId, 'session.snapshot', { sessionId, sinceTime }, { timeoutMs: 20_000 })
     return value === undefined || value === null ? EMPTY : value
-  }
-
-  peekLocal(persistence, localId) {
-    return persistence?.stat === undefined ? undefined : persistence.stat(localId)
   }
 
   /** Append new events to an existing mirrored session. */
@@ -117,6 +125,11 @@ export class SessionMirror {
     return events.reduce((max, event) => Math.max(max, Number(event.seq ?? 0)), 0)
   }
 
+  isMirrorRow(row) {
+    const cwd = String(row?.cwd ?? '')
+    return cwd !== '' && MIRROR_CWD.test(cwd)
+  }
+
   async ensure(peerId, row) {
     const remoteId = String(row?.id ?? '')
     if (remoteId === '') return undefined
@@ -124,9 +137,8 @@ export class SessionMirror {
     const known = this.local.get(key)
     if (known !== undefined && row?.rev !== undefined && known.rev === String(row.rev)) return known.localId
     if (known !== undefined) {
-      // The local copy may have been deleted since the last pass.
       const persistence = this.ctx.get?.('sessionPersistence')
-      const exists = await this.peekLocal(persistence, known.localId).catch(() => undefined)
+      const exists = await persistence?.stat?.(known.localId).catch(() => undefined)
       if (exists === undefined) this.local.delete(key)
     }
     const current = this.local.get(key)
@@ -141,7 +153,7 @@ export class SessionMirror {
       if (events.length > 0) {
         await this.appendInto(current.localId, events)
         this.syncedAt = Math.max(this.syncedAt, latestTime)
-        this.log(`appended ${events.length} event(s) to ${current.localId} from ${remoteId}`)
+        this.note(`streamed ${events.length} event(s) into ${current.localId} from ${remoteId}`)
       }
       current.time = latestTime
       current.seq = Math.max(current.seq, this.maxSeq(events))
@@ -165,7 +177,7 @@ export class SessionMirror {
       rev: row?.rev === undefined ? undefined : String(row.rev),
     })
     this.syncedAt = Math.max(this.syncedAt, latestTime)
-    this.log(`mirrored ${remoteId} -> ${localId} (${events.length} events)`)
+    this.note(`mirrored ${remoteId} -> ${localId} (${events.length} events)`)
     return localId
   }
 
@@ -173,9 +185,12 @@ export class SessionMirror {
     if (this.busy || this.hub === undefined || this.hub.connected !== true) return
     this.busy = true
     await this.load()
+    let peers = 0
+    let skipped = 0
     try {
       for (const peer of this.hub.peers.values()) {
         if (this.node !== undefined && peer.id === this.node.id) continue
+        peers += 1
         let page
         try {
           page = await this.hub.call(peer.id, 'session.list', {}, { timeoutMs: 8_000 })
@@ -184,6 +199,7 @@ export class SessionMirror {
           continue
         }
         for (const row of page?.items ?? []) {
+          if (this.isMirrorRow(row)) { skipped += 1; continue }
           try {
             await this.ensure(peer.id, row)
           } catch (error) {
@@ -191,9 +207,21 @@ export class SessionMirror {
           }
         }
       }
+      if (peers === 0) this.note('no peers online')
+      else this.syncedAt = Math.max(this.syncedAt, 0)
+      if (skipped > 0) this.failures.delete('loop')
     } finally {
       await this.save()
       this.busy = false
+    }
+  }
+
+  summary() {
+    return {
+      syncedAt: this.syncedAt,
+      count: this.local.size,
+      sharedCwd: this.sharedCwd(),
+      recent: this.recent.slice(-30),
     }
   }
 }

@@ -85,6 +85,8 @@ window.__ModuleLoader__.load({
       .nf-badge.tool{color:#9333ea;border-color:#d8b4fe}
       .nf-empty{color:var(--dsw-alias-label-secondary);font-size:12px;padding:14px 4px}
       .nf-error{color:#ef4444;font-size:12px;white-space:pre-wrap}
+      .nf-log{margin-top:8px;max-height:190px;overflow:auto;border-radius:8px;background:rgba(0,0,0,.28);padding:8px}
+      .nf-log-line{font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.6;color:#9ca3af;white-space:pre-wrap;word-break:break-all}
       .nf-textarea-wrap{display:flex;flex-direction:column;gap:8px;position:sticky;bottom:0;background:var(--dsw-alias-bg-primary);padding-top:8px}
       .nf-turn-tail{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary);padding:2px 0}
       .nf-header-badge{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-secondary);border-radius:999px;padding:2px 8px;cursor:pointer;white-space:nowrap;background:transparent}
@@ -270,6 +272,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(undefined)
       const [newTarget, setNewTarget] = React.useState('')
       const [provenanceRecords, setProvenanceRecords] = React.useState([])
+      const [syncing, setSyncing] = React.useState(false)
       React.useEffect(() => { void store.refresh(); void store.loadLocalSessions(); store.connect() }, [store])
       React.useEffect(() => {
         if (selected === undefined) return
@@ -323,6 +326,29 @@ window.__ModuleLoader__.load({
           h('div', { className: 'nf-muted' }, `connected: ${status?.hub?.connected === true} · state=${status?.hub?.state ?? '?'} · attempts=${status?.hub?.attempts ?? 0}`),
           h('div', { className: 'nf-muted' }, `peers: ${(status?.peers ?? []).length} · lan: ${(status?.hub?.lanUrl ?? '') || '(none)'}`),
           status?.hub?.lastError ? h('div', { className: 'nf-error' }, `last error: ${status.hub.lastError}`) : null,
+        ),
+        h('div', { className: 'nf-card' },
+          h('h2', { className: 'nf-section-title' }, '共享工作区 / Shared workspace'),
+          h('div', { className: 'nf-row' },
+            h('span', { className: 'nf-muted' }, status?.mirror?.syncedAt
+              ? `已同步至 ${new Date(status.mirror.syncedAt).toLocaleTimeString()} · 镜像会话 ${status.mirror.count ?? 0} 个`
+              : '尚未同步'),
+            h('button', {
+              className: 'nf-btn',
+              disabled: syncing,
+              onClick: () => {
+                setSyncing(true)
+                void rpc('mirror.sync', {}).then((value) => { setSyncing(false); if (value) store.refresh() })
+                  .catch((error) => { setSyncing(false); store.set({ error: error.message }) })
+              },
+            }, syncing ? '同步中…' : '立即同步'),
+          ),
+          h('div', { className: 'nf-log' },
+            (status?.mirror?.recent ?? []).length === 0
+              ? h('div', { className: 'nf-muted' }, '（还没有同步记录）')
+              : (status.mirror.recent).slice().reverse().map((line, index) => h('div', { key: index, className: 'nf-log-line' },
+                `${new Date(line.t).toLocaleTimeString()}  ${line.text}`)),
+          ),
         ),
         state.error ? h('div', { className: 'nf-error' }, state.error) : null,
         h('div', { className: 'nf-grid' },
