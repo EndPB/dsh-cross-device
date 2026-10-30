@@ -112,6 +112,9 @@ export async function apply(ctx, config = {}) {
   let hubTarget = ''
   let hubError = ''
   let hubAttempts = 0
+  // Filled by the mirror pass; read by buildState, so it must exist before the
+  // first state publication.
+  const mirrorStats = { syncedAt: 0, count: 0, sharedCwd: '' }
   const shownHubUrl = () => {
     const localUrl = `ws://127.0.0.1:${localHub?.port ?? settings.hub.port ?? 8788}`
     if (hubTarget === '' || hubTarget === localUrl) return lanUrls(localHub?.port ?? settings.hub.port ?? 8788)[0] ?? hubTarget
@@ -146,6 +149,7 @@ export async function apply(ctx, config = {}) {
       capabilities: (peer.capabilities ?? []).map((capability) => ({ name: capability.name, description: capability.description, danger: capability.danger === true })),
     })),
     registry: registry.snapshot(),
+    mirror: { ...mirrorStats },
     coordinating: sessionFabric?.listCoordinating() ?? [],
     viewing: sessionFabric?.listViewing() ?? [],
     capabilities: toolFabric.summary(),
@@ -161,21 +165,48 @@ export async function apply(ctx, config = {}) {
 
   sessionFabric = new SessionFabric({ ctx, hub: undefined, node, registry, provenance, settings, log, onUpdate })
   await sessionFabric.init()
-  const mirror = new SessionMirror({ ctx, hub: undefined, settings, log })
+  const mirror = new SessionMirror({ ctx, hub: undefined, settings, node, log })
   const listLocalSessions = async () => {
     const controller = ctx.get?.('sessionController')
-    if (controller?.list === undefined) return []
-    const value = await controller.list({}, new AbortController().signal)
-    return (value?.items ?? []).map((item) => ({
-      id: String(item.sessionId ?? item.id ?? ''),
-      title: item.title ?? undefined,
-      cwd: item.cwd,
-      running: item.running === true,
-      updatedAt: item.updatedAt ?? item.mtime,
-      node: node.name,
-      nodeId: node.id,
-      local: true,
-    })).filter((row) => row.id !== '')
+    const persistence = ctx.get?.('sessionPersistence')
+    const titles = new Map()
+    const running = new Map()
+    if (controller?.list !== undefined) {
+      const value = await controller.list({}, new AbortController().signal).catch(() => undefined)
+      for (const item of value?.items ?? []) {
+        const id = String(item.sessionId ?? item.id ?? '')
+        if (id === '') continue
+        if (item.title !== undefined) titles.set(id, item.title)
+        running.set(id, item.running === true)
+      }
+    }
+    // `revision` is one cheap change token per stored session: the peer uses it
+    // to skip sessions that have not moved since the last mirror pass.
+    const snapshots = persistence?.list === undefined ? [] : await persistence.list({}).catch(() => [])
+    const rows = []
+    for (const snapshot of snapshots ?? []) {
+      const id = String(snapshot?.header?.id ?? '')
+      if (id === '') continue
+      rows.push({
+        id,
+        title: titles.get(id),
+        cwd: snapshot.header.cwd,
+        createdAt: snapshot.header.createdAt,
+        updatedAt: snapshot.header.createdAt,
+        running: running.get(id) === true,
+        rev: snapshot.revision === undefined ? undefined : String(snapshot.revision),
+        bytes: snapshot.sizeBytes,
+        node: node.name,
+        nodeId: node.id,
+        local: true,
+      })
+    }
+    if (rows.length === 0) {
+      for (const [id, title] of titles) {
+        rows.push({ id, title, running: running.get(id) === true, node: node.name, nodeId: node.id, local: true })
+      }
+    }
+    return rows
   }
   const createLocalSession = async (cwd) => {
     const controller = ctx.get?.('sessionController')
@@ -189,8 +220,16 @@ export async function apply(ctx, config = {}) {
       const query = ctx.get?.('sessionQuery')
       if (query?.readSession === undefined) throw new Error('sessionQuery is unavailable')
       const id = String(params?.sessionId ?? '')
-      const log_ = await query.readSession(id)
-      return { manifest: { header: log_.session }, events: log_.events, title: undefined }
+      const sinceTime = Number(params?.sinceTime ?? 0)
+      const read = await query.readSession(id)
+      const all = Array.isArray(read?.events) ? read.events : []
+      // Timestamp versioning: the caller names the newest event it already has
+      // and only receives the tail. One idle session costs one filtered array.
+      const events = sinceTime > 0
+        ? all.filter((event) => Number(event?.time ?? 0) > sinceTime)
+        : all
+      const latestTime = all.reduce((max, event) => Math.max(max, Number(event?.time ?? 0)), 0)
+      return { manifest: { header: read?.session }, events, latestTime, title: undefined }
     }
     if (method === 'session.list') return { items: await listLocalSessions() }
     if (method === 'sessions.create') return await createLocalSession(params?.cwd)
@@ -417,6 +456,14 @@ export async function apply(ctx, config = {}) {
       case 'refresh':
         await refresh()
         return buildState()
+      case 'mirror.sync': {
+        await mirror.syncAll()
+        mirrorStats.syncedAt = mirror.syncedAt
+        mirrorStats.count = mirror.local.size
+        mirrorStats.sharedCwd = mirror.sharedCwd()
+        onUpdate()
+        return { ...mirrorStats }
+      }
       default:
         throw Object.assign(new Error(`unknown endpoint ${JSON.stringify(endpoint)}`), { code: 'UNKNOWN_ENDPOINT' })
     }
@@ -475,8 +522,16 @@ export async function apply(ctx, config = {}) {
   const firstHub = (await betterHub()) ?? (localHub !== undefined ? localUrl : undefined)
   if (firstHub !== undefined) await startHubClient(firstHub)
   else log('no hub yet; waiting for a LAN beacon')
-  void mirror.syncAll()
-  const mirrorTimer = setInterval(() => { void mirror.syncAll() }, 10_000)
+  // One shared-workspace timestamp: every mirrored session contributes its own
+  // newest event time, and the pass publishes the workspace-wide maximum.
+  const runMirror = async () => {
+    await mirror.syncAll()
+    mirrorStats.syncedAt = mirror.syncedAt
+    mirrorStats.count = mirror.local.size
+    mirrorStats.sharedCwd = mirror.sharedCwd()
+  }
+  void runMirror().then(onUpdate).catch(() => {})
+  const mirrorTimer = setInterval(() => { void runMirror().then(onUpdate).catch(() => {}) }, 8_000)
   mirrorTimer.unref?.()
   const electionTimer = setInterval(async () => {
     if (hub === undefined || hub.connected !== true) {
