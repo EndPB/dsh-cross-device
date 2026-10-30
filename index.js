@@ -232,7 +232,7 @@ export async function apply(ctx, config = {}) {
     localHub = await createHubServer({
       host: '0.0.0.0',
       port,
-      allowAny: settings.hub.allowAny === true || (settings.hub.runLocal === true && !settings.github.repo),
+      allowAny: settings.hub.allowAny !== false,
       hubName: `${node.name} hub`,
       logger: { info: log, warn: log },
     })
