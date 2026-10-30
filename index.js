@@ -24,6 +24,7 @@ import { androidCapabilities } from './src/host/capabilities/android.js'
 import { slugify } from './src/protocol.js'
 import { GitHubDeviceFlow } from './src/host/github-device.js'
 import { LanLink } from './src/host/lan.js'
+import { SessionMirror } from './src/host/mirror.js'
 
 export const name = 'dsh-cross-device'
 export const inject = ['tools', 'sessions']
@@ -160,6 +161,7 @@ export async function apply(ctx, config = {}) {
 
   sessionFabric = new SessionFabric({ ctx, hub: undefined, node, registry, provenance, settings, log, onUpdate })
   await sessionFabric.init()
+  const mirror = new SessionMirror({ ctx, hub: undefined, settings, log })
   const listLocalSessions = async () => {
     const controller = ctx.get?.('sessionController')
     if (controller?.list === undefined) return []
@@ -183,6 +185,13 @@ export async function apply(ctx, config = {}) {
     return { id }
   }
   const onRpc = async (method, params, frame) => {
+    if (method === 'session.snapshot') {
+      const query = ctx.get?.('sessionQuery')
+      if (query?.readSession === undefined) throw new Error('sessionQuery is unavailable')
+      const id = String(params?.sessionId ?? '')
+      const log_ = await query.readSession(id)
+      return { manifest: { header: log_.session }, events: log_.events, title: undefined }
+    }
     if (method === 'session.list') return { items: await listLocalSessions() }
     if (method === 'sessions.create') return await createLocalSession(params?.cwd)
     if (method.startsWith('tool.') || method.startsWith('node.')) return toolFabric.handleRpc(method, params, frame)
@@ -215,6 +224,7 @@ export async function apply(ctx, config = {}) {
     hub = new HubClient({ url, node, privateKey: node.privateKey, onRpc, onEvent: onHubEvent, log })
     toolFabric.hub = hub
     sessionFabric.hub = hub
+    mirror.hub = hub
     hub.url = url
     hub.setCatalog(toolFabric.catalog())
     void hub.connect().then(async () => {
@@ -465,6 +475,9 @@ export async function apply(ctx, config = {}) {
   const firstHub = (await betterHub()) ?? (localHub !== undefined ? localUrl : undefined)
   if (firstHub !== undefined) await startHubClient(firstHub)
   else log('no hub yet; waiting for a LAN beacon')
+  void mirror.syncAll()
+  const mirrorTimer = setInterval(() => { void mirror.syncAll() }, 10_000)
+  mirrorTimer.unref?.()
   const electionTimer = setInterval(async () => {
     if (hub === undefined || hub.connected !== true) {
       if (hub !== undefined && hub.state === 'connecting') return
