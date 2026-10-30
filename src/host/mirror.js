@@ -153,6 +153,11 @@ export class SessionMirror {
   keyOf(peerId, row) {
     const origin = row?.origin
     if (origin?.nodeId && origin?.sessionId) return `${origin.nodeId}:${origin.sessionId}`
+    // A copy keeps the source header's createdAt through materializeSession, so
+    // createdAt is the same on every copy of one logical session. Peers that do
+    // not report an origin are still deduplicated by this stable birth stamp.
+    const createdAt = Number(row?.createdAt ?? 0)
+    if (createdAt > 0) return `t${createdAt}`
     return `${peerId}:${String(row?.id ?? '')}`
   }
 
